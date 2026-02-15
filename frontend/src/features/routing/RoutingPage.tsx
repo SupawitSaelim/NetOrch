@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { getRoutes, getBGPSummary } from '../../api/endpoints';
 import { useState } from 'react';
+import { SkeletonTable as _SkeletonTable, ErrorBanner as _ErrorBanner } from '../../components/Shared';
 
 export default function RoutingPage() {
   const [protocolFilter, setProtocolFilter] = useState<string>('');

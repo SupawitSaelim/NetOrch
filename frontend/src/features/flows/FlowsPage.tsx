@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { getFlows, getSwitches } from '../../api/endpoints';
+import { SkeletonTable, ErrorBanner, EmptyState } from '../../components/Shared';
 
 export default function FlowsPage() {
   const flows = useQuery({
@@ -17,8 +18,16 @@ export default function FlowsPage() {
     <div>
       <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 24 }}>SDN Flows</h2>
 
+      {flows.isLoading && <SkeletonTable rows={4} cols={5} />}
+      {flows.isError && <ErrorBanner message="Failed to load flow data." />}
+      {!flows.isLoading && !flows.isError && !flows.data?.flows?.length && (
+        <EmptyState icon="🔄" title="No flows" description="No OpenFlow rules found." />
+      )}
+
       {/* Switches */}
+      {!switches.isLoading && (
       <div
+        className="fade-in"
         style={{
           background: 'var(--color-bg-card)',
           border: '1px solid var(--color-border)',
@@ -61,9 +70,12 @@ export default function FlowsPage() {
           ))}
         </div>
       </div>
+      )}
 
       {/* Flow Table */}
+      {(flows.data?.flows?.length ?? 0) > 0 && (
       <div
+        className="fade-in"
         style={{
           background: 'var(--color-bg-card)',
           border: '1px solid var(--color-border)',
@@ -112,11 +124,8 @@ export default function FlowsPage() {
           </tbody>
         </table>
         {flows.isLoading && <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-text-muted)' }}>Loading...</div>}
-        {flows.isError && <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-danger)' }}>Error loading flows: {String(flows.error)}</div>}
-        {flows.data && flows.data.flows.length === 0 && (
-          <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-text-muted)' }}>No flow rules configured</div>
-        )}
       </div>
+      )}
     </div>
   );
 }

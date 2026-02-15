@@ -1,15 +1,19 @@
 import { useQuery } from '@tanstack/react-query';
 import { getHealth, getMonitoringStats, getEvents } from '../../api/endpoints';
+import { SkeletonCard, ErrorBanner } from '../../components/Shared';
 
-function StatCard({ label, value, color }: { label: string; value: string | number; color: string }) {
+function StatCard({ label, value, color, delay = 0 }: { label: string; value: string | number; color: string; delay?: number }) {
   return (
     <div
+      className="card-hover slide-up"
       style={{
         background: 'var(--color-bg-card)',
         border: '1px solid var(--color-border)',
         borderRadius: 12,
         padding: '20px 24px',
         flex: '1 1 200px',
+        animationDelay: `${delay}ms`,
+        animationFillMode: 'backwards',
       }}
     >
       <div style={{ fontSize: 13, color: 'var(--color-text-muted)', marginBottom: 8 }}>{label}</div>
@@ -34,33 +38,42 @@ export default function Dashboard() {
       <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 24 }}>Dashboard</h2>
 
       {/* Stat Cards */}
+      {isLoading ? (
+        <div style={{ marginBottom: 24 }}><SkeletonCard count={5} /></div>
+      ) : (
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 24 }}>
         <StatCard
           label="System Status"
           value={health.data?.status ?? '...'}
           color={health.data?.status === 'healthy' ? 'var(--color-success)' : 'var(--color-danger)'}
+          delay={0}
         />
         <StatCard
           label="Total Routes"
           value={stats.data?.components?.frr?.total_routes ?? '...'}
           color="var(--color-primary)"
+          delay={60}
         />
         <StatCard
           label="Active Flows"
           value={stats.data?.components?.ovs?.flows ?? '...'}
           color="#a78bfa"
+          delay={120}
         />
         <StatCard
           label="BGP Neighbors"
           value={stats.data?.components?.frr?.bgp_neighbors ?? '...'}
           color="var(--color-warning)"
+          delay={180}
         />
         <StatCard
           label="Switches"
           value={stats.data?.components?.ryu?.switches ?? '...'}
           color="#2dd4bf"
+          delay={240}
         />
       </div>
+      )}
 
       {/* Component Health */}
       <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 24 }}>
@@ -166,9 +179,7 @@ export default function Dashboard() {
       )}
 
       {health.isError && (
-        <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-danger)', background: 'var(--color-bg-card)', borderRadius: 12, marginTop: 16 }}>
-          Failed to connect to backend. Make sure the API server is running on port 8000.
-        </div>
+        <ErrorBanner message="Failed to connect to backend. Make sure the API server is running on port 8000." />
       )}
     </div>
   );

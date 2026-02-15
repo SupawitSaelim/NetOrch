@@ -1,16 +1,19 @@
 import { useQuery } from '@tanstack/react-query';
 import { getTopology } from '../../api/endpoints';
+import { SkeletonCard, ErrorBanner, EmptyState } from '../../components/Shared';
 
 const NODE_COLORS: Record<string, string> = {
   switch: '#3b82f6',
   router: '#22c55e',
   host: '#a78bfa',
+  network: '#f59e0b',
 };
 
 const NODE_ICONS: Record<string, string> = {
   switch: '🔀',
   router: '🖧',
   host: '💻',
+  network: '🌐',
 };
 
 export default function TopologyPage() {
@@ -27,8 +30,16 @@ export default function TopologyPage() {
     <div>
       <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 24 }}>Network Topology</h2>
 
+      {topology.isLoading && <SkeletonCard count={1} />}
+      {topology.isError && <ErrorBanner message="Failed to load topology data." />}
+      {!topology.isLoading && !topology.isError && nodes.length === 0 && (
+        <EmptyState icon="🌐" title="No topology data" description="Waiting for OVS/FRR discovery..." />
+      )}
+
       {/* Simple SVG topology */}
+      {nodes.length > 0 && (
       <div
+        className="fade-in"
         style={{
           background: 'var(--color-bg-card)',
           border: '1px solid var(--color-border)',
@@ -37,7 +48,7 @@ export default function TopologyPage() {
           marginBottom: 24,
         }}
       >
-        <svg width="100%" height="400" viewBox="0 0 550 420" style={{ display: 'block' }}>
+        <svg width="100%" height="450" viewBox="0 0 600 430" style={{ display: 'block' }}>
           {/* Links */}
           {links.map((link) => {
             const src = nodes.find((n) => n.id === link.source);
@@ -94,9 +105,11 @@ export default function TopologyPage() {
           })}
         </svg>
       </div>
+      )}
 
       {/* Node & Link tables */}
-      <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+      {nodes.length > 0 && (
+      <div className="fade-in" style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
         <div
           style={{
             flex: '1 1 250px',
@@ -169,6 +182,7 @@ export default function TopologyPage() {
           </table>
         </div>
       </div>
+      )}
     </div>
   );
 }

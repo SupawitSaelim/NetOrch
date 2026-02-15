@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { getMonitoringStats, getEvents } from '../../api/endpoints';
 import { useState } from 'react';
+import { SkeletonCard as _SkeletonCard, ErrorBanner as _ErrorBanner } from '../../components/Shared';
 
 export default function MonitoringPage() {
   const [levelFilter, setLevelFilter] = useState('');
