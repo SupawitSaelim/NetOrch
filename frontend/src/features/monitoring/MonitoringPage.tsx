@@ -1,25 +1,105 @@
 import { useQuery } from '@tanstack/react-query';
 import { getMonitoringStats, getEvents } from '../../api/endpoints';
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { SkeletonCard as _SkeletonCard, ErrorBanner as _ErrorBanner } from '../../components/Shared';
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  Title,
+  Tooltip,
+  Filler,
+  Legend,
+} from 'chart.js';
+import { Line } from 'react-chartjs-2';
+
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Title, Tooltip, Filler, Legend);
+
+const MAX_POINTS = 30;
 
 export default function MonitoringPage() {
   const [levelFilter, setLevelFilter] = useState('');
+
+  // History buffers for charts
+  const cpuHistory = useRef<number[]>([]);
+  const memHistory = useRef<number[]>([]);
+  const labelHistory = useRef<string[]>([]);
+  const [, forceUpdate] = useState(0);
+
   const stats = useQuery({
     queryKey: ['monitoring-stats'],
     queryFn: () => getMonitoringStats().then((r) => r.data),
-    refetchInterval: 10_000,
+    refetchInterval: 5_000,
   });
+
   const events = useQuery({
     queryKey: ['events', levelFilter],
     queryFn: () => getEvents(levelFilter || undefined, 50).then((r) => r.data),
   });
 
+  // Append data to history when stats updates
+  useEffect(() => {
+    if (!stats.data) return;
+    const now = new Date().toLocaleTimeString();
+    cpuHistory.current.push(stats.data.cpu_usage);
+    memHistory.current.push(stats.data.memory_usage);
+    labelHistory.current.push(now);
+    if (cpuHistory.current.length > MAX_POINTS) {
+      cpuHistory.current.shift();
+      memHistory.current.shift();
+      labelHistory.current.shift();
+    }
+    forceUpdate((n) => n + 1);
+  }, [stats.data]);
+
+  const chartOptions = {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: { duration: 400 } as const,
+    scales: {
+      y: { min: 0, max: 100, ticks: { callback: (v: any) => `${v}%`, color: '#94a3b8' }, grid: { color: 'rgba(148, 163, 184, .1)' } },
+      x: { ticks: { maxTicksLimit: 8, color: '#94a3b8' }, grid: { display: false } },
+    },
+    plugins: { legend: { display: false } },
+  };
+
+  const cpuChartData = {
+    labels: labelHistory.current,
+    datasets: [
+      {
+        label: 'CPU %',
+        data: cpuHistory.current,
+        borderColor: '#3b82f6',
+        backgroundColor: 'rgba(59, 130, 246, .15)',
+        fill: true,
+        tension: 0.3,
+        pointRadius: 2,
+      },
+    ],
+  };
+
+  const memChartData = {
+    labels: labelHistory.current,
+    datasets: [
+      {
+        label: 'Memory %',
+        data: memHistory.current,
+        borderColor: '#a78bfa',
+        backgroundColor: 'rgba(167, 139, 250, .15)',
+        fill: true,
+        tension: 0.3,
+        pointRadius: 2,
+      },
+    ],
+  };
+
   return (
     <div>
       <h2 style={{ fontSize: 22, fontWeight: 700, marginBottom: 24 }}>Monitoring</h2>
 
-      {/* System Metrics */}
+      {/* Stat cards */}
       {stats.data && (
         <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 24 }}>
           {[
@@ -40,6 +120,50 @@ export default function MonitoringPage() {
             >
               <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 6 }}>{m.label}</div>
               <div style={{ fontSize: 24, fontWeight: 700, color: m.color }}>{m.value}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Charts */}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 24 }}>
+        <div style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', borderRadius: 12, padding: 20 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, color: '#3b82f6' }}>📈 CPU Usage (real-time)</h3>
+          <div style={{ height: 200 }}>
+            <Line data={cpuChartData} options={chartOptions as any} />
+          </div>
+        </div>
+        <div style={{ background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', borderRadius: 12, padding: 20 }}>
+          <h3 style={{ fontSize: 14, fontWeight: 600, marginBottom: 12, color: '#a78bfa' }}>📈 Memory Usage (real-time)</h3>
+          <div style={{ height: 200 }}>
+            <Line data={memChartData} options={chartOptions as any} />
+          </div>
+        </div>
+      </div>
+
+      {/* Component Health Cards */}
+      {stats.data?.components && (
+        <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 24 }}>
+          {[
+            { label: 'FRR', items: [
+              `${stats.data.components.frr.bgp_neighbors} BGP neighbors`,
+              `${stats.data.components.frr.ospf_neighbors} OSPF neighbors`,
+              `${stats.data.components.frr.total_routes} routes`,
+            ], color: '#10b981' },
+            { label: 'OVS', items: [
+              `${stats.data.components.ovs.bridges} bridges`,
+              `${stats.data.components.ovs.flows} flows`,
+            ], color: '#3b82f6' },
+            { label: 'Ryu', items: [
+              `${stats.data.components.ryu.switches} switches`,
+              `${stats.data.components.ryu.controllers} controller`,
+            ], color: '#f59e0b' },
+          ].map((c) => (
+            <div key={c.label} style={{ flex: '1 1 200px', background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', borderRadius: 12, padding: '16px 20px' }}>
+              <div style={{ fontSize: 14, fontWeight: 700, color: c.color, marginBottom: 8 }}>{c.label}</div>
+              {c.items.map((item) => (
+                <div key={item} style={{ fontSize: 13, color: 'var(--color-text-muted)', lineHeight: 1.8 }}>• {item}</div>
+              ))}
             </div>
           ))}
         </div>

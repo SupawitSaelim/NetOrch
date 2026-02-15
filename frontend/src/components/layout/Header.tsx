@@ -1,7 +1,15 @@
 import { useAppStore } from '../../stores/appStore';
 import { useAuthStore } from '../../stores/authStore';
 
-export default function Header() {
+type Props = { wsStatus?: 'connecting' | 'connected' | 'disconnected' };
+
+const WS_COLORS = {
+  connected: 'var(--color-success)',
+  connecting: '#f59e0b',
+  disconnected: 'var(--color-danger)',
+} as const;
+
+export default function Header({ wsStatus = 'disconnected' }: Props) {
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const systemMode = useAppStore((s) => s.systemMode);
   const { isAuthenticated, username, logout } = useAuthStore();
@@ -50,6 +58,22 @@ export default function Header() {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        {/* Live WebSocket indicator */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }} title={`WebSocket: ${wsStatus}`}>
+          <span
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: '50%',
+              background: WS_COLORS[wsStatus],
+              display: 'inline-block',
+              animation: wsStatus === 'connected' ? 'status-pulse 2s infinite' : undefined,
+            }}
+          />
+          <span style={{ fontSize: 11, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>
+            {wsStatus === 'connected' ? 'Live' : wsStatus}
+          </span>
+        </div>
         {isAuthenticated ? (
           <>
             <span style={{ fontSize: 14, color: 'var(--color-text-muted)' }}>

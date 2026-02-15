@@ -44,6 +44,16 @@ export const getFlows = (dpid?: string) =>
     params: dpid ? { dpid } : {},
   });
 
+export const addFlow = (data: {
+  dpid: string;
+  priority?: number;
+  match: Record<string, unknown>;
+  actions: Record<string, unknown>[];
+}) => client.post<{ success: boolean; flow_id: string }>('/sdn/flows', data);
+
+export const deleteFlow = (flowId: string) =>
+  client.delete<{ message: string }>(`/sdn/flows/${flowId}`);
+
 export const getSwitches = () =>
   client.get<{ switches: Switch[] }>('/switches');
 

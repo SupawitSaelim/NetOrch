@@ -1,220 +1,192 @@
-Project Requirements
+# 🔷 NetOrch — Hybrid SDN Orchestration Platform
 
-Web-Based Hybrid SDN and Routing Orchestration Platform
+A web-based hybrid network orchestration platform that integrates traditional IP routing (FRRouting) with Software-Defined Networking (OVS + SDN controller) through a modern React dashboard and FastAPI backend.
 
-⸻
+![CI](https://github.com/<owner>/NetOrch/actions/workflows/ci.yml/badge.svg)
 
-1. Project Overview
+---
 
-This project aims to design and implement a web-based hybrid network orchestration platform that integrates traditional IP routing and Software-Defined Networking (SDN) concepts into a single controllable system.
+## Architecture
 
-The platform combines:
-	•	Dynamic routing control using FRRouting
-	•	Policy-based flow control using an SDN controller
-	•	High-performance packet forwarding using a virtual switch
-	•	A centralized Web GUI for orchestration, visualization, and management
+```
+┌─────────────────────────────────────────────────────────┐
+│                    React Frontend                       │
+│  Dashboard │ Topology │ Routing │ Flows │ Monitoring    │
+│  (Vite + React 19 + TailwindCSS 4 + Chart.js)         │
+└──────────────────────┬──────────────────────────────────┘
+                       │  REST API + WebSocket
+┌──────────────────────▼──────────────────────────────────┐
+│                  FastAPI Backend                         │
+│  Orchestrator → FRR Service / Ryu Service / OVS Service │
+│  JWT Auth │ Real-time WS broadcast │ SSH tunneling      │
+└──────────────────────┬──────────────────────────────────┘
+                       │  SSH / HTTP
+┌──────────────────────▼──────────────────────────────────┐
+│              RHEL VM (Network Node)                      │
+│  FRRouting 10.1  │  Open vSwitch 3.4  │  SDN REST API  │
+│  BGP/OSPF/Static │  Bridges/VXLAN/GRE │  Flow Control  │
+└─────────────────────────────────────────────────────────┘
+```
 
-The project is designed primarily as a learning, experimentation, and portfolio platform, while maintaining an architecture close to real-world production systems used in data centers, cloud environments, and service provider networks.
+## Features
 
-⸻
+| Feature | Description |
+|---------|-------------|
+| **Dashboard** | System health, component status, recent events, uptime |
+| **Topology** | Auto-discovered SVG topology from real OVS bridges, FRR routes, VXLAN/GRE tunnels |
+| **Routing** | BGP summary, OSPF neighbors, route table with protocol filtering |
+| **SDN Flows** | Full CRUD — view, add, delete OpenFlow rules with auth-protected mutations |
+| **Monitoring** | Real-time CPU/Memory charts (Chart.js), event log, component health cards |
+| **WebSocket** | Live updates pushed every 5s — stats, topology, events auto-refresh |
+| **Authentication** | JWT-based auth for write operations |
 
-2. Goals and Objectives
+## Tech Stack
 
-Primary Goals
-	•	Provide a unified control platform for routing control-plane and SDN-based flow control
-	•	Enable users to manage complex network behaviors through a Web GUI
-	•	Demonstrate hybrid networking principles rather than replacing traditional routing
-	•	Simulate real-world network scenarios such as data center fabrics and WANs
+| Layer | Technology |
+|-------|------------|
+| Frontend | React 19, TypeScript, Vite 7, Tailwind CSS 4, @tanstack/react-query 5, Chart.js, Zustand |
+| Backend | Python 3.11, FastAPI, Pydantic v2, httpx, python-jose (JWT) |
+| Infrastructure | FRRouting 10.1, Open vSwitch 3.4.1, Custom SDN REST API |
+| DevOps | Docker Compose, GitHub Actions CI, nginx reverse proxy |
 
-Learning Objectives
-	•	Understand the interaction between routing protocols and SDN flow programming
-	•	Gain hands-on experience with virtual switching, tunneling, and overlay networking
-	•	Learn how orchestration layers interact with network control and data planes
-	•	Develop a production-like system architecture suitable for interviews and technical discussions
+---
 
-⸻
+## Quick Start
 
-3. System Architecture
+### Prerequisites
 
-High-Level Architecture
+- Python 3.9+ and Node.js 22+
+- SSH access to a VM running FRRouting + OVS (or set `FRR_ENABLED=false` etc. for mock mode)
 
-Web Frontend (GUI)
-        |
-REST API (Backend)
-        |
-------------------------------------------------
-|              |               |               |
-Routing Engine   SDN Controller   Switch Manager   Topology & Monitoring
-(FRR)             (Ryu)           (OVS)           (Discovery / Metrics)
-        |
-Linux Kernel Networking Stack
+### 1. Backend
 
-Architectural Principles
-	•	Clear separation of concerns between routing, flow control, and forwarding
-	•	Modular components that can be deployed together or independently
-	•	Support for both single-node and multi-node deployments
-	•	Linux-based infrastructure for full networking feature support
+```bash
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env   # edit VM_HOST, credentials, etc.
+uvicorn app.main:app --reload --port 8000
+```
 
-⸻
+### 2. Frontend
 
-4. Deployment Models
+```bash
+cd frontend
+npm install
+npm run dev    # → http://localhost:5173
+```
 
-4.1 Single-Node Deployment (Phase 1)
-	•	All components run on a single Linux virtual machine
-	•	Used for development, debugging, and proof-of-concept
-	•	Simplified networking topology
+### 3. Docker (production)
 
-4.2 Multi-Node Deployment (Phase 2)
-	•	Separate nodes for controllers and forwarding devices
-	•	Simulates production-like distributed environments
-	•	Supports scalability and failure scenarios
+```bash
+docker compose up --build
+# Frontend → http://localhost:80
+# Backend  → http://localhost:8000
+```
 
-⸻
+---
 
-5. Supported Network Modes
+## API Endpoints
 
-5.1 Data Center (DC) Mode
-	•	Overlay networking using VXLAN
-	•	Control-plane based on BGP EVPN
-	•	Multi-tenant virtual network segmentation
-	•	Logical L2/L3 separation per tenant
+### System
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/health` | Health check |
+| GET | `/api/v1/system/info` | System version, mode, uptime |
 
-5.2 WAN Mode
-	•	Traditional routing using BGP and/or OSPF
-	•	Tunneling using GRE or VXLAN
-	•	Policy-based traffic steering
-	•	Path selection and failover simulation
+### Routing
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/routing/routes` | — | Route table (filter by `?protocol=bgp`) |
+| GET | `/api/v1/routing/bgp/summary` | — | BGP summary |
+| GET | `/api/v1/routing/bgp/neighbors` | — | BGP neighbors |
+| GET | `/api/v1/routing/ospf/neighbors` | — | OSPF neighbors |
+| POST | `/api/v1/routing/static` | ✅ | Add static route |
 
-The system must support switching between DC Mode and WAN Mode via configuration or GUI selection.
+### SDN
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/api/v1/sdn/flows` | — | List all flows |
+| POST | `/api/v1/sdn/flows` | ✅ | Add a flow rule |
+| DELETE | `/api/v1/sdn/flows/{id}` | ✅ | Delete a flow rule |
+| GET | `/api/v1/switches` | — | List switches |
+| POST | `/api/v1/switches` | ✅ | Create OVS bridge |
 
-⸻
+### Topology
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/topology` | Auto-discovered topology |
+| POST | `/api/v1/topology/refresh` | Force topology refresh |
 
-6. Functional Requirements
+### Monitoring
+| Method | Path | Description |
+|--------|------|-------------|
+| GET | `/api/v1/monitoring/stats` | CPU, memory, component stats |
+| GET | `/api/v1/monitoring/events` | Event log |
 
-6.1 Web Graphical User Interface (GUI)
+### WebSocket
+| Path | Description |
+|------|-------------|
+| `ws://host/api/v1/ws` | Real-time stats, topology, events (JSON messages) |
 
-The Web GUI shall:
-	•	Provide a centralized dashboard for network management
-	•	Visualize network topology (nodes, links, tunnels)
-	•	Display routing tables and forwarding states
-	•	Allow creation, modification, and deletion of network policies
-	•	Support real-time or near-real-time updates
+---
 
-⸻
+## Project Structure
 
-6.2 Backend API Layer
+```
+NetOrch/
+├── backend/
+│   ├── app/
+│   │   ├── api/          # FastAPI routes (health, routing, sdn, topology, monitoring, ws)
+│   │   ├── core/         # Config, security (JWT)
+│   │   ├── schemas/      # Pydantic models
+│   │   └── services/     # FRR, Ryu, OVS, Topology, Orchestrator
+│   ├── tests/            # 45+ pytest tests
+│   ├── Dockerfile
+│   └── requirements.txt
+├── frontend/
+│   ├── src/
+│   │   ├── api/          # Axios client + endpoint functions
+│   │   ├── components/   # Layout (Header, Sidebar), Shared (Skeleton, ErrorBanner)
+│   │   ├── features/     # Dashboard, Topology, Routing, Flows, Monitoring pages
+│   │   ├── hooks/        # useWebSocket
+│   │   ├── stores/       # Zustand (auth, app state)
+│   │   └── types/        # TypeScript interfaces
+│   ├── Dockerfile
+│   └── nginx.conf
+├── scripts/              # VM setup scripts
+├── docker-compose.yml
+├── .github/workflows/    # CI pipeline
+└── docs/                 # Architecture & API documentation
+```
 
-The backend shall:
-	•	Expose RESTful APIs for all major platform functions
-	•	Translate GUI actions into system-level network configurations
-	•	Act as an orchestration layer between routing, SDN, and switching components
-	•	Validate user input and prevent invalid configurations
+## Testing
 
-⸻
+```bash
+# Run all backend tests (no VM required — mock mode)
+cd backend && source .venv/bin/activate
+FRR_ENABLED=false RYU_ENABLED=false OVS_ENABLED=false pytest tests/ -v
 
-6.3 Routing Control (FRRouting)
+# Frontend type check
+cd frontend && npx tsc --noEmit
+```
 
-The routing subsystem shall:
-	•	Support dynamic routing protocols such as BGP and OSPF
-	•	Allow configuration of routing neighbors through the Web GUI
-	•	Maintain and expose routing tables via the backend API
-	•	Support EVPN control-plane for overlay networking
-	•	Reload or update routing configurations dynamically without full system restart
+## Environment Variables
 
-⸻
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VM_HOST` | `192.168.64.3` | VM IP address |
+| `VM_USER` | `root` | SSH user |
+| `SSH_KEY_PATH` | `~/.ssh/id_ed25519` | SSH private key |
+| `FRR_ENABLED` | `true` | Enable real FRR connections |
+| `RYU_ENABLED` | `true` | Enable SDN API connections |
+| `OVS_ENABLED` | `true` | Enable OVS connections |
+| `SECRET_KEY` | — | JWT signing secret |
 
-6.4 SDN Control (Ryu Controller)
+---
 
-The SDN subsystem shall:
-	•	Act as a centralized flow control engine
-	•	Handle packet-in events from forwarding devices
-	•	Install, modify, and remove flow rules dynamically
-	•	Enforce policy-based forwarding decisions
-	•	Provide REST APIs for flow and policy management
+## License
 
-⸻
+This project is built as a learning and portfolio platform for hybrid SDN orchestration.
 
-6.5 Data Plane (Virtual Switching)
-
-The data plane shall:
-	•	Forward packets based on installed flow rules
-	•	Support VLANs and overlay tunnels
-	•	Integrate with the Linux kernel networking stack
-	•	Provide visibility into flow tables and forwarding behavior
-	•	Allow traffic manipulation such as drop, redirect, or modify actions
-
-⸻
-
-6.6 Topology Discovery and Monitoring
-
-The platform shall:
-	•	Discover network topology automatically or semi-automatically
-	•	Monitor link and node status
-	•	Collect statistics such as packet counts and flow utilization
-	•	Display monitoring data in the Web GUI
-
-⸻
-
-7. Advanced Features (Optional / Phase 3)
-	•	Failure simulation (link down, node failure)
-	•	Traffic engineering and policy-based path selection
-	•	Multi-tenant isolation and segmentation
-	•	Scenario-based demos (DC fabric, SD-WAN, hybrid cloud)
-	•	Exportable logs and metrics
-
-⸻
-
-8. Security and Access Control
-
-The system should:
-	•	Restrict access to the Web GUI using authentication
-	•	Separate read-only and administrative operations
-	•	Prevent unsafe or destructive network configurations
-	•	Log configuration changes for audit purposes
-
-⸻
-
-9. Technology Stack Requirements
-
-Core Technologies
-	•	Linux-based operating system
-	•	Python for backend services and SDN logic
-	•	RESTful APIs for component communication
-
-Frontend
-	•	Modern JavaScript framework (e.g., React or Vue)
-	•	Topology visualization library
-	•	Responsive UI design
-
-Backend
-	•	API framework (e.g., FastAPI or Flask)
-	•	System command execution and process control
-	•	Configuration templating and state management
-
-⸻
-
-10. Documentation Requirements
-
-The project must include:
-	•	High-level architecture documentation
-	•	Detailed component descriptions
-	•	Deployment guides for single-node and multi-node setups
-	•	Example use cases and demos
-	•	Clear README suitable for public GitHub deployment
-
-⸻
-
-11. Expected Outcomes
-
-By completing this project, the system will:
-	•	Demonstrate practical knowledge of hybrid networking architectures
-	•	Provide a realistic simulation of modern network infrastructures
-	•	Serve as a strong technical portfolio project
-	•	Enable deeper understanding of routing, SDN, and orchestration concepts
-
-⸻
-
-12. Key Design Philosophy
-
-This project does not aim to replace traditional routing with SDN,
-but to augment routing with SDN-based policy control in a unified platform.
+See [REQUIREMENTS.md](REQUIREMENTS.md) for the original project requirements document.

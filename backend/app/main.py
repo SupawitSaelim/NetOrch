@@ -1,12 +1,14 @@
 """NetOrch Backend - Hybrid SDN Orchestration Platform API."""
 
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.health import router as health_router
 from app.api.v1.router import router as v1_router
+from app.api.v1.ws import router as ws_router, start_broadcast_loop, manager as ws_manager
 from app.core.config import settings
 
 # Configure logging
@@ -15,12 +17,22 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Startup / shutdown lifecycle."""
+    start_broadcast_loop()
+    ws_manager.push_event("info", "system", "Platform started — WebSocket broadcasting enabled")
+    yield
+
+
 app = FastAPI(
     title=settings.project_name,
     version="0.1.0",
     description="REST API for the Hybrid SDN and Routing Orchestration Platform",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # CORS - allow frontend dev server
@@ -40,6 +52,7 @@ app.add_middleware(
 # Mount routers
 app.include_router(health_router, prefix=settings.api_v1_prefix)
 app.include_router(v1_router, prefix=settings.api_v1_prefix)
+app.include_router(ws_router, prefix=settings.api_v1_prefix)
 
 
 @app.get("/", tags=["Root"])

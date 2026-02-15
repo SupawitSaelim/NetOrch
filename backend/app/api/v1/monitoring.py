@@ -8,6 +8,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import get_orchestrator
+from app.api.v1.ws import manager as ws_manager
 from app.schemas.topology import (
     Event,
     EventListResponse,
@@ -19,37 +20,20 @@ from app.services.orchestrator import Orchestrator
 
 router = APIRouter(prefix="/monitoring", tags=["Monitoring"])
 
-# Mock events log
-MOCK_EVENTS = [
-    Event(
-        id="evt-001",
-        timestamp="2026-02-15T10:00:00Z",
-        level="info",
-        component="bgp",
-        message="BGP neighbor 10.0.0.2 state changed to Established",
-    ),
-    Event(
-        id="evt-002",
-        timestamp="2026-02-15T09:45:00Z",
-        level="info",
-        component="ovs",
-        message="Bridge br0 created",
-    ),
-    Event(
-        id="evt-003",
-        timestamp="2026-02-15T09:30:00Z",
-        level="warning",
-        component="ryu",
-        message="High CPU usage detected on Ryu controller",
-    ),
-    Event(
-        id="evt-004",
-        timestamp="2026-02-15T09:00:00Z",
-        level="info",
-        component="system",
-        message="Platform started in DC mode",
-    ),
+# Seed a few events into the WebSocket manager so the list isn't empty
+_SEED_EVENTS = [
+    ("info", "bgp", "BGP neighbor 10.0.0.2 state changed to Established"),
+    ("info", "ovs", "Bridge br0 created"),
+    ("warning", "ryu", "High CPU usage detected on Ryu controller"),
+    ("info", "system", "Platform started in DC mode"),
 ]
+
+
+def _ensure_seed_events():
+    """Push seed events once (when fewer than 5 events exist)."""
+    if len(ws_manager.events) < 5:
+        for level, comp, msg in reversed(_SEED_EVENTS):
+            ws_manager.push_event(level, comp, msg)
 
 
 @router.get("/stats", response_model=MonitoringStatsResponse)
@@ -89,8 +73,10 @@ async def get_events(
     level: str | None = Query(None, description="Filter by level"),
     limit: int = Query(100, ge=1, le=1000),
 ):
-    """Get system events/logs."""
-    events = MOCK_EVENTS
+    """Get system events/logs (backed by real-time event store)."""
+    _ensure_seed_events()
+    raw = ws_manager.events
+    events = [Event(**e) for e in raw]
     if level:
         events = [e for e in events if e.level == level]
     events = events[:limit]
