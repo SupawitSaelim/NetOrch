@@ -5,8 +5,10 @@ const navItems = [
   { path: '/', label: 'Dashboard', icon: '📊' },
   { path: '/topology', label: 'Topology', icon: '🌐' },
   { path: '/routing', label: 'Routing', icon: '🛣️' },
+  { path: '/routers', label: 'Routers', icon: '🔀' },
   { path: '/flows', label: 'SDN Flows', icon: '📡' },
   { path: '/monitoring', label: 'Monitoring', icon: '📈' },
+  { path: '/terminal', label: 'Terminal', icon: '💻' },
 ];
 
 export default function Sidebar() {

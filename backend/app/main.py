@@ -9,6 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api.health import router as health_router
 from app.api.v1.router import router as v1_router
 from app.api.v1.ws import router as ws_router, start_broadcast_loop, manager as ws_manager
+from app.api.v1.terminal import router as terminal_router
 from app.core.config import settings
 
 # Configure logging
@@ -53,6 +54,7 @@ app.add_middleware(
 app.include_router(health_router, prefix=settings.api_v1_prefix)
 app.include_router(v1_router, prefix=settings.api_v1_prefix)
 app.include_router(ws_router, prefix=settings.api_v1_prefix)
+app.include_router(terminal_router, prefix=settings.api_v1_prefix)
 
 
 @app.get("/", tags=["Root"])

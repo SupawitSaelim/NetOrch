@@ -138,3 +138,17 @@ export interface Event {
   component: string;
   message: string;
 }
+
+// --- VRF (Virtual Routers) ---
+export interface VRFInfo {
+  name: string;
+  table_id: number | null;
+  interfaces: string[];
+  routes: number;
+  state: string;
+}
+
+export interface VRFListResponse {
+  vrfs: VRFInfo[];
+  total: number;
+}

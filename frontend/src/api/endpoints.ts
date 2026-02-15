@@ -10,6 +10,7 @@ import type {
   SystemInfo,
   TokenResponse,
   Topology,
+  VRFListResponse,
 } from '../types';
 
 // --- Auth ---
@@ -69,3 +70,20 @@ export const getEvents = (level?: string, limit?: number) =>
   client.get<{ events: Event[]; total: number }>('/monitoring/events', {
     params: { ...(level ? { level } : {}), ...(limit ? { limit } : {}) },
   });
+
+// --- VRF (Virtual Routers) ---
+export const getVRFs = () => client.get<VRFListResponse>('/vrf');
+
+export const createVRF = (data: { name: string; table_id?: number }) =>
+  client.post<{ success: boolean; message: string }>('/vrf', data);
+
+export const deleteVRF = (name: string) =>
+  client.delete<{ success: boolean; message: string }>(`/vrf/${name}`);
+
+export const configureVRFBGP = (
+  name: string,
+  data: { asn: number; router_id?: string; networks: string[] },
+) => client.post<{ success: boolean; message: string }>(`/vrf/${name}/bgp`, data);
+
+export const getVRFRoutes = (name: string) =>
+  client.get<{ routes: unknown; routes_raw?: string; total: number }>(`/vrf/${name}/routes`);

@@ -7,6 +7,8 @@ const TopologyPage = lazy(() => import('./features/topology/TopologyPage'));
 const RoutingPage = lazy(() => import('./features/routing/RoutingPage'));
 const FlowsPage = lazy(() => import('./features/flows/FlowsPage'));
 const MonitoringPage = lazy(() => import('./features/monitoring/MonitoringPage'));
+const TerminalPage = lazy(() => import('./features/terminal/TerminalPage'));
+const RoutersPage = lazy(() => import('./features/routers/RoutersPage'));
 
 function Loading() {
   return (
@@ -57,6 +59,22 @@ export default function App() {
           element={
             <Suspense fallback={<Loading />}>
               <MonitoringPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="terminal"
+          element={
+            <Suspense fallback={<Loading />}>
+              <TerminalPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="routers"
+          element={
+            <Suspense fallback={<Loading />}>
+              <RoutersPage />
             </Suspense>
           }
         />

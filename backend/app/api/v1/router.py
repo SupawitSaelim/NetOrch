@@ -8,6 +8,7 @@ from app.api.v1.routing import router as routing_router
 from app.api.v1.sdn import router as sdn_router
 from app.api.v1.system import router as system_router
 from app.api.v1.topology import router as topology_router
+from app.api.v1.vrf import router as vrf_router
 
 router = APIRouter()
 
@@ -17,3 +18,4 @@ router.include_router(routing_router)
 router.include_router(sdn_router)
 router.include_router(topology_router)
 router.include_router(monitoring_router)
+router.include_router(vrf_router)
