@@ -63,9 +63,23 @@ class Orchestrator:
         switches = await self.ryu.get_switches()
         bridges = await self.ovs.list_bridges()
 
+        # Try to get real CPU/memory from VM
+        cpu_usage = 12.5
+        memory_usage = 35.0
+        try:
+            from app.services.ssh_utils import ssh_exec
+            cpu_r = await ssh_exec("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'")
+            if cpu_r.returncode == 0 and cpu_r.stdout.strip():
+                cpu_usage = float(cpu_r.stdout.strip())
+            mem_r = await ssh_exec("free | awk '/Mem:/{printf \"%.1f\", $3/$2*100}'")
+            if mem_r.returncode == 0 and mem_r.stdout.strip():
+                memory_usage = float(mem_r.stdout.strip())
+        except Exception:
+            pass
+
         return {
-            "cpu_usage": 12.5,  # Mock
-            "memory_usage": 35.0,  # Mock
+            "cpu_usage": cpu_usage,
+            "memory_usage": memory_usage,
             "uptime": self.uptime,
             "api_requests_total": self._request_count,
             "components": {

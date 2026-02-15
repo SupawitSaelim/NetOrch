@@ -26,13 +26,18 @@ class Settings(BaseSettings):
     # System Mode
     system_mode: Literal["dc", "wan"] = "dc"
 
+    # VM Connection (SSH to Red Hat VM)
+    vm_host: str = "192.168.64.3"
+    vm_user: str = "root"
+    vm_ssh_key: str = "~/.ssh/id_ed25519"
+
     # FRRouting
     frr_enabled: bool = False
     frr_vtysh_path: str = "/usr/bin/vtysh"
 
-    # Ryu SDN Controller
+    # Ryu SDN Controller / SDN REST API
     ryu_enabled: bool = False
-    ryu_url: str = "http://localhost:8080"
+    ryu_url: str = "http://192.168.64.3:8080"
 
     # Open vSwitch
     ovs_enabled: bool = False
