@@ -7,10 +7,12 @@ export default function RoutingPage() {
   const routes = useQuery({
     queryKey: ['routes', protocolFilter],
     queryFn: () => getRoutes(protocolFilter || undefined).then((r) => r.data),
+    refetchInterval: 15_000,
   });
   const bgp = useQuery({
     queryKey: ['bgp-summary'],
     queryFn: () => getBGPSummary().then((r) => r.data),
+    refetchInterval: 15_000,
   });
 
   return (
@@ -98,6 +100,7 @@ export default function RoutingPage() {
             <option value="ospf">OSPF</option>
             <option value="static">Static</option>
             <option value="connected">Connected</option>
+            <option value="kernel">Kernel</option>
           </select>
         </div>
 
@@ -146,6 +149,10 @@ export default function RoutingPage() {
           </tbody>
         </table>
         {routes.isLoading && <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-text-muted)' }}>Loading...</div>}
+        {routes.isError && <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-danger)' }}>Error loading routes</div>}
+        {routes.data && routes.data.routes.length === 0 && (
+          <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-text-muted)' }}>No routes found</div>
+        )}
       </div>
     </div>
   );

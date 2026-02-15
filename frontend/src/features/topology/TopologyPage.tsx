@@ -17,6 +17,7 @@ export default function TopologyPage() {
   const topology = useQuery({
     queryKey: ['topology'],
     queryFn: () => getTopology().then((r) => r.data),
+    refetchInterval: 30_000,
   });
 
   const nodes = topology.data?.nodes ?? [];

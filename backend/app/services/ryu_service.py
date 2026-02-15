@@ -54,15 +54,65 @@ MOCK_SWITCHES = [
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+def _parse_actions(actions_raw: Any) -> list[dict]:
+    """Convert actions (string or list) into a list of {type, port} dicts."""
+    if isinstance(actions_raw, list):
+        return actions_raw  # already structured
+    if not isinstance(actions_raw, str):
+        return []
+    result: list[dict] = []
+    for part in actions_raw.split(","):
+        part = part.strip()
+        if ":" in part:
+            atype, val = part.split(":", 1)
+            result.append({"type": atype.upper(), "port": val})
+        elif part:
+            result.append({"type": part.upper(), "port": ""})
+    return result
+
+
+def _parse_match_from_raw(raw_str: str) -> dict:
+    """Extract match fields from the raw ovs-ofctl dump-flows line."""
+    match: dict[str, str] = {}
+    # Everything between priority=N, ... actions=... is match
+    import re as _re
+    m = _re.search(r'priority=\d+[,\s]*(.*?)\s*actions=', raw_str)
+    if m:
+        fields = m.group(1)
+        for field in fields.split(","):
+            field = field.strip()
+            if not field:
+                continue
+            if "=" in field:
+                k, v = field.split("=", 1)
+                match[k.strip()] = v.strip()
+            else:
+                match[field] = "true"
+    return match
+
+
 def _normalize_flow(raw: dict, bridge: str = "br0", idx: int = 0) -> dict:
     """Convert a flow dict from the SDN REST API into our standard shape."""
+    # Parse match from raw line if present
+    match = raw.get("match", {})
+    if not match and "raw" in raw:
+        match = _parse_match_from_raw(raw["raw"])
+
+    # Parse table from raw
+    table_id = raw.get("table_id", raw.get("table", 0))
+    if table_id == 0 and "raw" in raw:
+        import re as _re
+        tm = _re.search(r'table=(\d+)', raw["raw"])
+        if tm:
+            table_id = int(tm.group(1))
+
     return {
         "id": raw.get("id", f"flow-{bridge}-{idx}"),
         "dpid": raw.get("dpid", bridge),
-        "table_id": raw.get("table_id", raw.get("table", 0)),
+        "table_id": table_id,
         "priority": raw.get("priority", 0),
-        "match": raw.get("match", {}),
-        "actions": raw.get("actions", []),
+        "match": match,
+        "actions": _parse_actions(raw.get("actions", [])),
         "packet_count": raw.get("packet_count", raw.get("n_packets", 0)),
         "byte_count": raw.get("byte_count", raw.get("n_bytes", 0)),
         "idle_timeout": raw.get("idle_timeout", 0),

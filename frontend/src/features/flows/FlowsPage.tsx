@@ -5,10 +5,12 @@ export default function FlowsPage() {
   const flows = useQuery({
     queryKey: ['flows'],
     queryFn: () => getFlows().then((r) => r.data),
+    refetchInterval: 15_000,
   });
   const switches = useQuery({
     queryKey: ['switches'],
     queryFn: () => getSwitches().then((r) => r.data),
+    refetchInterval: 15_000,
   });
 
   return (
@@ -98,7 +100,10 @@ export default function FlowsPage() {
                     .join(', ')}
                 </td>
                 <td style={{ padding: 8, fontFamily: 'monospace', fontSize: 11 }}>
-                  {f.actions.map((a) => `${a.type}:${a.port ?? ''}`).join(', ')}
+                  {f.actions.map((a: any, i: number) => {
+                    const label = typeof a === 'string' ? a : `${a.type ?? ''}${a.port ? ':' + a.port : ''}`;
+                    return <span key={i}>{i > 0 ? ', ' : ''}{label}</span>;
+                  })}
                 </td>
                 <td style={{ padding: 8 }}>{f.packet_count.toLocaleString()}</td>
                 <td style={{ padding: 8 }}>{f.byte_count.toLocaleString()}</td>
@@ -107,6 +112,10 @@ export default function FlowsPage() {
           </tbody>
         </table>
         {flows.isLoading && <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-text-muted)' }}>Loading...</div>}
+        {flows.isError && <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-danger)' }}>Error loading flows: {String(flows.error)}</div>}
+        {flows.data && flows.data.flows.length === 0 && (
+          <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-text-muted)' }}>No flow rules configured</div>
+        )}
       </div>
     </div>
   );

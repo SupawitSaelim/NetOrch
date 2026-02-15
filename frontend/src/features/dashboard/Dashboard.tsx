@@ -19,11 +19,12 @@ function StatCard({ label, value, color }: { label: string; value: string | numb
 }
 
 export default function Dashboard() {
-  const health = useQuery({ queryKey: ['health'], queryFn: () => getHealth().then((r) => r.data) });
-  const stats = useQuery({ queryKey: ['stats'], queryFn: () => getMonitoringStats().then((r) => r.data) });
+  const health = useQuery({ queryKey: ['health'], queryFn: () => getHealth().then((r) => r.data), refetchInterval: 10_000 });
+  const stats = useQuery({ queryKey: ['stats'], queryFn: () => getMonitoringStats().then((r) => r.data), refetchInterval: 10_000 });
   const events = useQuery({
     queryKey: ['events'],
     queryFn: () => getEvents(undefined, 10).then((r) => r.data),
+    refetchInterval: 15_000,
   });
 
   const isLoading = health.isLoading || stats.isLoading;
@@ -161,6 +162,12 @@ export default function Dashboard() {
         >
           CPU: {stats.data.cpu_usage}% | Memory: {stats.data.memory_usage}% | Uptime:{' '}
           {Math.floor(stats.data.uptime / 3600)}h | API Requests: {stats.data.api_requests_total}
+        </div>
+      )}
+
+      {health.isError && (
+        <div style={{ padding: 20, textAlign: 'center', color: 'var(--color-danger)', background: 'var(--color-bg-card)', borderRadius: 12, marginTop: 16 }}>
+          Failed to connect to backend. Make sure the API server is running on port 8000.
         </div>
       )}
     </div>
