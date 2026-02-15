@@ -1,0 +1,67 @@
+import { Routes, Route, Navigate } from 'react-router-dom';
+import { Suspense, lazy } from 'react';
+import Layout from './components/layout/Layout';
+
+const Dashboard = lazy(() => import('./features/dashboard/Dashboard'));
+const TopologyPage = lazy(() => import('./features/topology/TopologyPage'));
+const RoutingPage = lazy(() => import('./features/routing/RoutingPage'));
+const FlowsPage = lazy(() => import('./features/flows/FlowsPage'));
+const MonitoringPage = lazy(() => import('./features/monitoring/MonitoringPage'));
+
+function Loading() {
+  return (
+    <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '50vh', color: 'var(--color-text-muted)' }}>
+      Loading...
+    </div>
+  );
+}
+
+export default function App() {
+  return (
+    <Routes>
+      <Route element={<Layout />}>
+        <Route
+          index
+          element={
+            <Suspense fallback={<Loading />}>
+              <Dashboard />
+            </Suspense>
+          }
+        />
+        <Route
+          path="topology"
+          element={
+            <Suspense fallback={<Loading />}>
+              <TopologyPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="routing"
+          element={
+            <Suspense fallback={<Loading />}>
+              <RoutingPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="flows"
+          element={
+            <Suspense fallback={<Loading />}>
+              <FlowsPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="monitoring"
+          element={
+            <Suspense fallback={<Loading />}>
+              <MonitoringPage />
+            </Suspense>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Route>
+    </Routes>
+  );
+}
