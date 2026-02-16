@@ -1,108 +1,205 @@
-"""SDN Controller / Ryu service - interface to SDN REST API on the VM.
+"""SDN Controller / Ryu service — manages OVS flows via SSH.
 
-The VM runs a custom SDN REST API (sdn_rest_api.py) on port 8080 that wraps
-ovs-vsctl and ovs-ofctl commands.  When disabled, returns mock data.
+Connects to the Red Hat VM over SSH to run ovs-vsctl / ovs-ofctl commands
+directly, giving full integration with the Topology Builder's switches.
+When ``ryu_enabled=True`` it can optionally proxy through a REST API.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
+import re
 import uuid
 from typing import Any
 
 import httpx
 
 from app.core.config import settings
+from app.services.ssh_utils import ssh_exec
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Mock data (used when ryu_enabled=False)
-# ---------------------------------------------------------------------------
-MOCK_FLOWS: list[dict[str, Any]] = [
-    {"id": "flow-001", "dpid": "0000000000000001", "table_id": 0, "priority": 100,
-     "match": {"in_port": 1, "eth_type": 2048, "ipv4_dst": "10.0.0.0/24"},
-     "actions": [{"type": "OUTPUT", "port": 2}],
-     "packet_count": 1000, "byte_count": 102400, "idle_timeout": 0, "hard_timeout": 0},
-    {"id": "flow-002", "dpid": "0000000000000001", "table_id": 0, "priority": 200,
-     "match": {"in_port": 2, "eth_type": 2048, "ipv4_dst": "10.0.1.0/24"},
-     "actions": [{"type": "OUTPUT", "port": 1}],
-     "packet_count": 850, "byte_count": 86400, "idle_timeout": 0, "hard_timeout": 0},
-    {"id": "flow-003", "dpid": "0000000000000002", "table_id": 0, "priority": 50,
-     "match": {"eth_type": 2054},
-     "actions": [{"type": "OUTPUT", "port": "FLOOD"}],
-     "packet_count": 500, "byte_count": 25600, "idle_timeout": 0, "hard_timeout": 0},
-]
-
-MOCK_SWITCHES = [
-    {"dpid": "0000000000000001", "name": "br0", "connected": True,
-     "controller": "tcp:127.0.0.1:6633",
-     "ports": [
-         {"port_no": 1, "name": "eth0", "hw_addr": "aa:bb:cc:dd:ee:01", "state": "up"},
-         {"port_no": 2, "name": "eth1", "hw_addr": "aa:bb:cc:dd:ee:02", "state": "up"},
-         {"port_no": 3, "name": "vxlan0", "hw_addr": "aa:bb:cc:dd:ee:03", "state": "up"},
-     ]},
-    {"dpid": "0000000000000002", "name": "br1", "connected": True,
-     "controller": "tcp:127.0.0.1:6633",
-     "ports": [
-         {"port_no": 1, "name": "eth2", "hw_addr": "aa:bb:cc:dd:ee:04", "state": "up"},
-         {"port_no": 2, "name": "eth3", "hw_addr": "aa:bb:cc:dd:ee:05", "state": "up"},
-     ]},
-]
-
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Helpers — parse ovs-ofctl output
 # ---------------------------------------------------------------------------
-def _parse_actions(actions_raw: Any) -> list[dict]:
-    """Convert actions (string or list) into a list of {type, port} dicts."""
-    if isinstance(actions_raw, list):
-        return actions_raw  # already structured
-    if not isinstance(actions_raw, str):
-        return []
+
+def _parse_actions_str(actions_str: str) -> list[dict]:
+    """Parse an OVS actions string like ``output:2,FLOOD`` into structured list."""
     result: list[dict] = []
-    for part in actions_raw.split(","):
+    for part in actions_str.split(","):
         part = part.strip()
+        if not part:
+            continue
         if ":" in part:
             atype, val = part.split(":", 1)
-            result.append({"type": atype.upper(), "port": val})
+            # Try to convert port number
+            try:
+                val_out: Any = int(val)
+            except ValueError:
+                val_out = val
+            result.append({"type": atype.upper(), "port": val_out})
         elif part:
             result.append({"type": part.upper(), "port": ""})
     return result
 
 
-def _parse_match_from_raw(raw_str: str) -> dict:
-    """Extract match fields from the raw ovs-ofctl dump-flows line."""
-    match: dict[str, str] = {}
-    # Everything between priority=N, ... actions=... is match
-    import re as _re
-    m = _re.search(r'priority=\d+[,\s]*(.*?)\s*actions=', raw_str)
-    if m:
-        fields = m.group(1)
-        for field in fields.split(","):
-            field = field.strip()
-            if not field:
-                continue
-            if "=" in field:
-                k, v = field.split("=", 1)
-                match[k.strip()] = v.strip()
-            else:
-                match[field] = "true"
-    return match
+def _parse_actions(actions_raw: Any) -> list[dict]:
+    """Convert actions (string or list) into a list of {type, port} dicts."""
+    if isinstance(actions_raw, list):
+        return actions_raw
+    if isinstance(actions_raw, str):
+        return _parse_actions_str(actions_raw)
+    return []
 
+
+def _flow_id_from_parts(bridge: str, priority: int, match: dict) -> str:
+    """Deterministic flow ID from bridge + priority + match fields."""
+    key = f"{bridge}|{priority}|{sorted(match.items())}"
+    h = hashlib.md5(key.encode()).hexdigest()[:8]
+    return f"flow-{bridge}-{h}"
+
+
+def _parse_dump_flows(output: str, bridge: str) -> list[dict]:
+    """Parse ``ovs-ofctl dump-flows`` output into structured flow dicts."""
+    flows: list[dict] = []
+    for line in output.splitlines():
+        line = line.strip()
+        # Skip header / empty
+        if not line or line.startswith("NXST_FLOW") or line.startswith("OFPST_FLOW"):
+            continue
+
+        # Extract priority
+        pri_m = re.search(r'priority=(\d+)', line)
+        priority = int(pri_m.group(1)) if pri_m else 0
+
+        # Extract table
+        tbl_m = re.search(r'table=(\d+)', line)
+        table_id = int(tbl_m.group(1)) if tbl_m else 0
+
+        # Extract match fields (between priority=N,... and actions=...)
+        match: dict[str, Any] = {}
+        m = re.search(r'priority=\d+[,\s]*(.*?)\s*actions=', line)
+        if m:
+            fields = m.group(1)
+            for field in fields.split(","):
+                field = field.strip()
+                if not field:
+                    continue
+                if "=" in field:
+                    k, v = field.split("=", 1)
+                    k = k.strip()
+                    v = v.strip()
+                    # Convert numeric values
+                    try:
+                        match[k] = int(v)
+                    except ValueError:
+                        match[k] = v
+                else:
+                    # Shorthand like "ip", "arp", "tcp" etc.
+                    match[field] = True
+
+        # Extract actions
+        act_m = re.search(r'actions=(.*)', line)
+        actions = _parse_actions_str(act_m.group(1)) if act_m else []
+
+        # Extract counters
+        npkt_m = re.search(r'n_packets=(\d+)', line)
+        nbyte_m = re.search(r'n_bytes=(\d+)', line)
+        idle_m = re.search(r'idle_timeout=(\d+)', line)
+        hard_m = re.search(r'hard_timeout=(\d+)', line)
+
+        flow_id = _flow_id_from_parts(bridge, priority, match)
+        flows.append({
+            "id": flow_id,
+            "dpid": bridge,
+            "table_id": table_id,
+            "priority": priority,
+            "match": match,
+            "actions": actions,
+            "packet_count": int(npkt_m.group(1)) if npkt_m else 0,
+            "byte_count": int(nbyte_m.group(1)) if nbyte_m else 0,
+            "idle_timeout": int(idle_m.group(1)) if idle_m else 0,
+            "hard_timeout": int(hard_m.group(1)) if hard_m else 0,
+        })
+    return flows
+
+
+def _parse_ofctl_show(output: str) -> tuple[str, list[dict]]:
+    """Parse ``ovs-ofctl show <bridge>`` to extract dpid & ports."""
+    dpid = ""
+    dp_m = re.search(r'dpid:([0-9a-fA-F]+)', output)
+    if dp_m:
+        dpid = dp_m.group(1)
+
+    ports: list[dict] = []
+    # Lines like:  1(pc1-veth): addr:...
+    for pm in re.finditer(r'(\d+)\(([^)]+)\):\s*addr:([0-9a-f:]+)', output):
+        ports.append({
+            "port_no": int(pm.group(1)),
+            "name": pm.group(2),
+            "hw_addr": pm.group(3),
+            "state": "up",
+        })
+    return dpid, ports
+
+
+def _match_dict_to_ofctl(match: dict) -> str:
+    """Convert match dict to ovs-ofctl match string."""
+    parts: list[str] = []
+    for k, v in match.items():
+        if isinstance(v, bool) and v:
+            parts.append(str(k))
+        else:
+            parts.append(f"{k}={v}")
+    return ",".join(parts)
+
+
+def _actions_list_to_ofctl(actions: list[dict]) -> str:
+    """Convert actions list to ovs-ofctl actions string."""
+    parts: list[str] = []
+    for a in actions:
+        atype = str(a.get("type", "")).upper()
+        port = a.get("port", "")
+        if atype == "OUTPUT" and port != "":
+            parts.append(f"output:{port}")
+        elif atype == "DROP":
+            parts.append("drop")
+        elif atype == "FLOOD":
+            parts.append("flood")
+        elif atype == "NORMAL":
+            parts.append("normal")
+        elif atype == "CONTROLLER":
+            parts.append(f"controller:{port}" if port else "controller")
+        elif port != "":
+            parts.append(f"{atype.lower()}:{port}")
+        else:
+            parts.append(atype.lower())
+    return ",".join(parts) if parts else "drop"
+
+
+# ---------------------------------------------------------------------------
+# Helpers — REST API (used when ryu_enabled=True)
+# ---------------------------------------------------------------------------
 
 def _normalize_flow(raw: dict, bridge: str = "br0", idx: int = 0) -> dict:
     """Convert a flow dict from the SDN REST API into our standard shape."""
-    # Parse match from raw line if present
     match = raw.get("match", {})
     if not match and "raw" in raw:
-        match = _parse_match_from_raw(raw["raw"])
+        m = re.search(r'priority=\d+[,\s]*(.*?)\s*actions=', raw["raw"])
+        if m:
+            for field in m.group(1).split(","):
+                field = field.strip()
+                if "=" in field:
+                    k, v = field.split("=", 1)
+                    match[k.strip()] = v.strip()
+                elif field:
+                    match[field] = "true"
 
-    # Parse table from raw
     table_id = raw.get("table_id", raw.get("table", 0))
     if table_id == 0 and "raw" in raw:
-        import re as _re
-        tm = _re.search(r'table=(\d+)', raw["raw"])
+        tm = re.search(r'table=(\d+)', raw["raw"])
         if tm:
             table_id = int(tm.group(1))
 
@@ -124,13 +221,13 @@ def _normalize_flow(raw: dict, bridge: str = "br0", idx: int = 0) -> dict:
 # Service class
 # ---------------------------------------------------------------------------
 class RyuService:
-    """Interface to the SDN REST API (or Ryu controller)."""
+    """Interface to OVS on the VM (via SSH, or optionally via REST API)."""
 
     def __init__(self) -> None:
-        self._enabled = settings.ryu_enabled
+        self._enabled = settings.ryu_enabled  # True = use REST API
         self._base_url = settings.ryu_url.rstrip("/")
 
-    # -- helpers -----------------------------------------------------------
+    # -- REST helpers (when ryu_enabled=True) ------------------------------
 
     async def _get(self, path: str, timeout: float = 8.0) -> Any:
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -150,32 +247,70 @@ class RyuService:
             resp.raise_for_status()
             return resp.json()
 
+    # ======================================================================
+    # SSH-based OVS operations (primary path)
+    # ======================================================================
+
+    async def _ssh_list_bridges(self) -> list[str]:
+        """List all OVS bridges on the VM."""
+        r = await ssh_exec("ovs-vsctl list-br")
+        if r.returncode != 0 or not r.stdout:
+            return []
+        return [b.strip() for b in r.stdout.splitlines() if b.strip()]
+
+    async def _ssh_get_switch(self, bridge: str) -> dict:
+        """Get switch info for one bridge via SSH."""
+        # Get ports + DPID
+        show_r = await ssh_exec(f"ovs-ofctl show {bridge}")
+        _hex_dpid, ports = _parse_ofctl_show(show_r.stdout) if show_r.returncode == 0 else ("", [])
+
+        # Get controller
+        ctrl_r = await ssh_exec(f"ovs-vsctl get-controller {bridge}")
+        controller = ctrl_r.stdout.strip() if ctrl_r.returncode == 0 else ""
+
+        # Use bridge name as dpid so ovs-ofctl commands work directly
+        return {
+            "dpid": bridge,
+            "name": bridge,
+            "connected": True,
+            "controller": controller,
+            "ports": ports,
+        }
+
     # -- Switches ----------------------------------------------------------
 
     async def get_switches(self) -> list[dict]:
         """Get all OVS bridges as 'switches'."""
-        if not self._enabled:
-            return MOCK_SWITCHES
+        if self._enabled:
+            try:
+                data = await self._get("/switches")
+                raw_list = data if isinstance(data, list) else data.get("switches", [])
+                switches = []
+                for sw in raw_list:
+                    switches.append({
+                        "dpid": sw.get("dpid", sw.get("name", "")),
+                        "name": sw.get("name", ""),
+                        "connected": sw.get("connected", True),
+                        "controller": sw.get("controller", ""),
+                        "ports": [
+                            {"port_no": i + 1, "name": p, "hw_addr": "", "state": "up"}
+                            for i, p in enumerate(sw.get("ports", []))
+                        ],
+                    })
+                return switches
+            except Exception as exc:
+                logger.warning("REST get_switches failed, falling back to SSH: %s", exc)
 
+        # SSH fallback (or primary when ryu_enabled=False)
         try:
-            data = await self._get("/switches")
-            # SDN REST API may return a list directly or {"switches": [...]}
-            raw_list = data if isinstance(data, list) else data.get("switches", [])
+            bridges = await self._ssh_list_bridges()
             switches = []
-            for sw in raw_list:
-                switches.append({
-                    "dpid": sw.get("dpid", sw.get("name", "")),
-                    "name": sw.get("name", ""),
-                    "connected": sw.get("connected", True),
-                    "controller": sw.get("controller", ""),
-                    "ports": [
-                        {"port_no": i + 1, "name": p, "hw_addr": "", "state": "up"}
-                        for i, p in enumerate(sw.get("ports", []))
-                    ],
-                })
+            for br in bridges:
+                sw = await self._ssh_get_switch(br)
+                switches.append(sw)
             return switches
         except Exception as exc:
-            logger.error("get_switches failed: %s", exc)
+            logger.error("get_switches (SSH) failed: %s", exc)
             return []
 
     async def get_switch(self, dpid: str) -> dict | None:
@@ -187,28 +322,42 @@ class RyuService:
 
     async def get_flows(self, dpid: str | None = None) -> list[dict]:
         """Get flow rules, optionally filtered by bridge/dpid."""
-        if not self._enabled:
-            if dpid:
-                return [f for f in MOCK_FLOWS if f["dpid"] == dpid]
-            return list(MOCK_FLOWS)
+        if self._enabled:
+            try:
+                if dpid:
+                    data = await self._get(f"/flows/{dpid}")
+                    raw_flows = data.get("flows", [])
+                    return [_normalize_flow(f, dpid, i) for i, f in enumerate(raw_flows)]
+                else:
+                    data = await self._get("/flows")
+                    all_flows: list[dict] = []
+                    if isinstance(data, dict):
+                        for bridge, flist in data.items():
+                            if isinstance(flist, list):
+                                for i, f in enumerate(flist):
+                                    all_flows.append(_normalize_flow(f, bridge, i))
+                    return all_flows
+            except Exception as exc:
+                logger.warning("REST get_flows failed, falling back to SSH: %s", exc)
 
+        # SSH fallback
         try:
             if dpid:
-                data = await self._get(f"/flows/{dpid}")
-                raw_flows = data.get("flows", [])
-                return [_normalize_flow(f, dpid, i) for i, f in enumerate(raw_flows)]
+                r = await ssh_exec(f"ovs-ofctl dump-flows {dpid}")
+                if r.returncode != 0:
+                    logger.error("ovs-ofctl dump-flows %s failed: %s", dpid, r.stderr)
+                    return []
+                return _parse_dump_flows(r.stdout, dpid)
             else:
-                data = await self._get("/flows")
-                # /flows returns {"bridge_name": [flows,...], ...}
-                all_flows: list[dict] = []
-                if isinstance(data, dict):
-                    for bridge, flist in data.items():
-                        if isinstance(flist, list):
-                            for i, f in enumerate(flist):
-                                all_flows.append(_normalize_flow(f, bridge, i))
-                return all_flows
+                bridges = await self._ssh_list_bridges()
+                all_flows_ssh: list[dict] = []
+                for br in bridges:
+                    r = await ssh_exec(f"ovs-ofctl dump-flows {br}")
+                    if r.returncode == 0:
+                        all_flows_ssh.extend(_parse_dump_flows(r.stdout, br))
+                return all_flows_ssh
         except Exception as exc:
-            logger.error("get_flows failed: %s", exc)
+            logger.error("get_flows (SSH) failed: %s", exc)
             return []
 
     async def get_flow(self, flow_id: str) -> dict | None:
@@ -218,54 +367,72 @@ class RyuService:
 
     async def add_flow(self, flow_data: dict) -> str:
         """Add a flow rule. Returns flow_id."""
-        flow_id = f"flow-{uuid.uuid4().hex[:6]}"
+        bridge = flow_data.get("dpid", "br0")
+        priority = flow_data.get("priority", 100)
+        match = flow_data.get("match", {})
+        actions = flow_data.get("actions", [])
 
-        if not self._enabled:
-            flow = {
-                "id": flow_id,
-                "dpid": flow_data["dpid"],
-                "table_id": flow_data.get("table_id", 0),
-                "priority": flow_data.get("priority", 100),
-                "match": flow_data.get("match", {}),
-                "actions": flow_data.get("actions", []),
-                "packet_count": 0, "byte_count": 0,
-                "idle_timeout": flow_data.get("idle_timeout", 0),
-                "hard_timeout": flow_data.get("hard_timeout", 0),
-            }
-            MOCK_FLOWS.append(flow)
-            return flow_id
+        flow_id = _flow_id_from_parts(bridge, priority, match)
 
+        if self._enabled:
+            try:
+                body = {"priority": priority, "match": match, "actions": actions}
+                await self._post(f"/flows/{bridge}", body)
+                return flow_id
+            except Exception as exc:
+                logger.warning("REST add_flow failed, falling back to SSH: %s", exc)
+
+        # SSH: ovs-ofctl add-flow bridge "priority=N,match,actions=..."
         try:
-            bridge = flow_data.get("dpid", "br0")
-            body = {
-                "priority": flow_data.get("priority", 100),
-                "match": flow_data.get("match", {}),
-                "actions": flow_data.get("actions", []),
-            }
-            await self._post(f"/flows/{bridge}", body)
+            match_str = _match_dict_to_ofctl(match)
+            actions_str = _actions_list_to_ofctl(actions)
+            flow_spec = f"priority={priority}"
+            if match_str:
+                flow_spec += f",{match_str}"
+            flow_spec += f",actions={actions_str}"
+
+            r = await ssh_exec(f'ovs-ofctl add-flow {bridge} "{flow_spec}"')
+            if r.returncode != 0:
+                logger.error("ovs-ofctl add-flow failed: %s", r.stderr)
+                raise RuntimeError(r.stderr)
             return flow_id
         except Exception as exc:
-            logger.error("add_flow failed: %s", exc)
-            return flow_id
+            logger.error("add_flow (SSH) failed: %s", exc)
+            raise
 
     async def delete_flow(self, flow_id: str) -> bool:
-        """Delete a flow rule."""
-        if not self._enabled:
-            orig = len(MOCK_FLOWS)
-            MOCK_FLOWS[:] = [f for f in MOCK_FLOWS if f["id"] != flow_id]
-            return len(MOCK_FLOWS) < orig
-
-        # For real flows we need the bridge — try to extract from flow_id
+        """Delete a flow rule by its ID."""
+        # Look up flow to get bridge + match
         flow = await self.get_flow(flow_id)
         if not flow:
             return False
+
+        bridge = flow.get("dpid", "br0")
+        priority = flow.get("priority", 0)
+        match = flow.get("match", {})
+
+        if self._enabled:
+            try:
+                body = {"priority": priority, "match": match}
+                await self._delete(f"/flows/{bridge}", body)
+                return True
+            except Exception as exc:
+                logger.warning("REST delete_flow failed, falling back to SSH: %s", exc)
+
+        # SSH: ovs-ofctl del-flows --strict bridge "priority=N,match"
         try:
-            bridge = flow.get("dpid", "br0")
-            body = {"priority": flow.get("priority"), "match": flow.get("match", {})}
-            await self._delete(f"/flows/{bridge}", body)
+            match_str = _match_dict_to_ofctl(match)
+            flow_spec = f"priority={priority}"
+            if match_str:
+                flow_spec += f",{match_str}"
+
+            r = await ssh_exec(f'ovs-ofctl del-flows --strict {bridge} "{flow_spec}"')
+            if r.returncode != 0:
+                logger.error("ovs-ofctl del-flows failed: %s", r.stderr)
+                return False
             return True
         except Exception as exc:
-            logger.error("delete_flow failed: %s", exc)
+            logger.error("delete_flow (SSH) failed: %s", exc)
             return False
 
     # -- Stats -------------------------------------------------------------
@@ -279,18 +446,23 @@ class RyuService:
             "flow_id": flow_id,
             "packet_count": flow.get("packet_count", 0),
             "byte_count": flow.get("byte_count", 0),
-            "duration_sec": 3600,
+            "duration_sec": 0,
             "duration_nsec": 0,
         }
 
     # -- Status ------------------------------------------------------------
 
     async def get_status(self) -> str:
-        """Check SDN REST API health."""
-        if not self._enabled:
-            return "mock"
+        """Check OVS connectivity."""
+        if self._enabled:
+            try:
+                data = await self._get("/health", timeout=5.0)
+                return "up" if data.get("status") in ("ok", "running") else "degraded"
+            except Exception:
+                pass
+        # SSH health check
         try:
-            data = await self._get("/health", timeout=5.0)
-            return "up" if data.get("status") in ("ok", "running") else "degraded"
+            r = await ssh_exec("ovs-vsctl show | head -1", timeout=5)
+            return "up" if r.returncode == 0 and r.stdout else "down"
         except Exception:
             return "down"
