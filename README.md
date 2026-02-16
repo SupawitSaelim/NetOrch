@@ -68,6 +68,21 @@ A web-based hybrid network orchestration platform that integrates traditional IP
 - Python 3.9+ and Node.js 22+
 - SSH access to a RHEL VM running FRRouting + OVS (or set `FRR_ENABLED=false` etc. for mock mode)
 
+### Dev Script (recommended)
+
+Start both backend and frontend with one command:
+
+```bash
+./dev.sh start     # launch backend (:8000) + frontend (:5173)
+./dev.sh stop      # kill both
+./dev.sh restart   # stop → start
+./dev.sh status    # check if running
+```
+
+Logs are saved in `.logs/backend.log` and `.logs/frontend.log`.
+
+### Manual Setup
+
 ### 1. Backend
 
 ```bash
