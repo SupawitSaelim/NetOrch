@@ -58,6 +58,7 @@ interface CreateSwitchForm {
   name: string;
   protocols: string;
   controller: string;
+  connectController: boolean;
 }
 
 interface CreateHostForm {
@@ -105,7 +106,7 @@ export default function TopologyPage() {
   useEffect(() => { linkSourceRef.current = linkSource; }, [linkSource]);
 
   // ── Form state ──
-  const [switchForm, setSwitchForm] = useState<CreateSwitchForm>({ name: '', protocols: 'OpenFlow13', controller: '' });
+  const [switchForm, setSwitchForm] = useState<CreateSwitchForm>({ name: '', protocols: 'OpenFlow13', controller: '', connectController: false });
   const [hostForm, setHostForm] = useState<CreateHostForm>({ name: '', ip: '', gateway: '' });
 
   // ── Toast ──
@@ -121,7 +122,7 @@ export default function TopologyPage() {
   });
 
   const createSwitchMut = useMutation({
-    mutationFn: (data: { name: string; x?: number; y?: number; protocols?: string; controller?: string }) =>
+    mutationFn: (data: { name: string; x?: number; y?: number; protocols?: string; controller?: string; fail_mode?: string }) =>
       createSwitch(data),
     onSuccess: (r, vars) => {
       // Optimistic: add switch to cache immediately
@@ -254,10 +255,13 @@ export default function TopologyPage() {
       x: pendingPosition?.x,
       y: pendingPosition?.y,
       protocols: switchForm.protocols || undefined,
-      controller: switchForm.controller || undefined,
+      controller: switchForm.connectController
+        ? (switchForm.controller || '127.0.0.1:6653')
+        : (switchForm.controller || undefined),
+      fail_mode: switchForm.connectController ? 'secure' : undefined,
     });
     setShowSwitchDialog(false);
-    setSwitchForm({ name: '', protocols: 'OpenFlow13', controller: '' });
+    setSwitchForm({ name: '', protocols: 'OpenFlow13', controller: '', connectController: false });
     setPendingPosition(null);
     setMode('select');
   };
@@ -851,10 +855,36 @@ export default function TopologyPage() {
                 <option value="OpenFlow15">OpenFlow 1.5</option>
               </select>
             </FieldLabel>
-            <FieldLabel label="SDN Controller (optional)">
-              <input value={switchForm.controller}
-                onChange={(e) => setSwitchForm({ ...switchForm, controller: e.target.value })}
-                placeholder="e.g. 127.0.0.1:6653" style={inputStyle} />
+            <FieldLabel label="SDN Controller">
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: 13 }}>
+                  <input type="checkbox" checked={switchForm.connectController}
+                    onChange={(e) => {
+                      const on = e.target.checked;
+                      setSwitchForm({ ...switchForm, connectController: on, controller: on ? '127.0.0.1:6653' : '' });
+                    }}
+                    style={{ width: 16, height: 16, accentColor: '#22c55e', cursor: 'pointer' }} />
+                  Connect to SDN Controller
+                </label>
+              </div>
+              {switchForm.connectController && (
+                <>
+                  <input value={switchForm.controller}
+                    onChange={(e) => setSwitchForm({ ...switchForm, controller: e.target.value })}
+                    placeholder="127.0.0.1:6653" style={inputStyle} />
+                  <div style={{ fontSize: 11, color: '#22c55e', marginTop: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span>✓</span> Auto L2 MAC-learning flows via netorch_controller (port 6653)
+                  </div>
+                  <div style={{ fontSize: 11, color: 'var(--color-text-muted)', marginTop: 2 }}>
+                    fail-mode: <strong>secure</strong> — packets dropped until controller installs flows
+                  </div>
+                </>
+              )}
+              {!switchForm.connectController && (
+                <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                  Standalone mode — OVS internal MAC-learning (no SDN control)
+                </div>
+              )}
             </FieldLabel>
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 20, justifyContent: 'flex-end' }}>

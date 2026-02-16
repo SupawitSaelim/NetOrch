@@ -95,6 +95,7 @@ export const createSwitch = (data: {
   y?: number;
   protocols?: string;
   controller?: string;
+  fail_mode?: string;
 }) => client.post<{ success: boolean; message: string; name: string }>('/topology/builder/switches', data);
 
 export const deleteSwitch = (name: string) =>

@@ -31,6 +31,7 @@ class CreateSwitchRequest(BaseModel):
     y: float | None = None
     protocols: str = "OpenFlow13"
     controller: str | None = None
+    fail_mode: str | None = None  # "secure" or "standalone"
 
 
 class CreateHostRequest(BaseModel):
@@ -114,6 +115,11 @@ async def create_switch(
     # Optional controller
     if req.controller:
         await ovs_exec(f"ovs-vsctl set-controller {name} tcp:{req.controller}")
+        # Set fail-mode (default to secure when controller is set)
+        fm = req.fail_mode or "secure"
+        await ovs_exec(f"ovs-vsctl set-fail-mode {name} {fm}")
+    elif req.fail_mode:
+        await ovs_exec(f"ovs-vsctl set-fail-mode {name} {req.fail_mode}")
 
     # Save position override
     if req.x is not None and req.y is not None:
