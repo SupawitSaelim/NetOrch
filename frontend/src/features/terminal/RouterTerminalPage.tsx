@@ -57,11 +57,9 @@ export default function RouterTerminalPage() {
 
     termInstance.current = term;
 
-    // Open WebSocket with netns param — always vtysh
-    const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const host = window.location.hostname;
-    const port = window.location.port;
-    const url = `${protocol}://${host}:${port}/api/v1/ws/terminal?shell=vtysh&netns=${routerName}`;
+    // Open WebSocket — use relative path so Vite proxy handles upgrade
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+    const url = `${wsProtocol}://${window.location.host}/api/v1/ws/terminal?shell=vtysh&netns=${routerName}`;
 
     const ws = new WebSocket(url);
     ws.binaryType = 'arraybuffer';
@@ -133,34 +131,8 @@ export default function RouterTerminalPage() {
     );
   }
 
-  // Disconnected: clean empty page with reconnect option
-  if (disconnected) {
-    return (
-      <div style={{
-        width: '100vw', height: '100vh', background: '#0f172a',
-        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16,
-      }}>
-        <div style={{ color: '#64748b', fontSize: 14 }}>
-          Connection to <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{routerName}</span> closed.
-        </div>
-        <button
-          onClick={connect}
-          style={{
-            padding: '8px 24px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.3)',
-            background: 'rgba(34,197,94,0.1)', color: '#22c55e', fontSize: 13,
-            fontWeight: 600, cursor: 'pointer',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.2)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.1)'; }}
-        >
-          Reconnect
-        </button>
-      </div>
-    );
-  }
-
   return (
-    <div style={{ width: '100vw', height: '100vh', background: '#0f172a', overflow: 'hidden' }}>
+    <div style={{ width: '100vw', height: '100vh', background: '#0f172a', overflow: 'hidden', position: 'relative' }}>
       {/* Minimal top bar — just router name + status dot */}
       <div style={{
         height: 32, display: 'flex', alignItems: 'center', padding: '0 12px',
@@ -176,11 +148,36 @@ export default function RouterTerminalPage() {
         <span style={{ color: '#475569' }}>vtysh</span>
       </div>
 
-      {/* Terminal fills remaining space */}
+      {/* Terminal fills remaining space — always mounted so ref is available for reconnect */}
       <div
         ref={termRef}
         style={{ width: '100%', height: 'calc(100vh - 32px)', overflow: 'hidden' }}
       />
+
+      {/* Disconnected overlay */}
+      {disconnected && (
+        <div style={{
+          position: 'absolute', inset: 0, background: '#0f172a',
+          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16,
+          zIndex: 10,
+        }}>
+          <div style={{ color: '#64748b', fontSize: 14 }}>
+            Connection to <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{routerName}</span> closed.
+          </div>
+          <button
+            onClick={connect}
+            style={{
+              padding: '8px 24px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.3)',
+              background: 'rgba(34,197,94,0.1)', color: '#22c55e', fontSize: 13,
+              fontWeight: 600, cursor: 'pointer',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.2)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.1)'; }}
+          >
+            Reconnect
+          </button>
+        </div>
+      )}
     </div>
   );
 }
