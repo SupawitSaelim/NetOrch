@@ -153,6 +153,12 @@ export const deleteLink = (sourceName: string, targetName: string) =>
 export const saveTopologyPositions = (positions: Record<string, { x: number; y: number }>) =>
   client.put<{ success: boolean; updated: number }>('/topology/builder/positions', { positions });
 
+export const clearAllTopology = () =>
+  client.delete<{
+    success: boolean; message: string;
+    removed_bridges: string[]; removed_namespaces: string[]; errors: string[];
+  }>('/topology/builder/all');
+
 // --- Network Tools ---
 export const toolPing = (data: { source: string; target: string; count?: number; timeout?: number }) =>
   client.post<{

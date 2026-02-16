@@ -10,6 +10,7 @@ import {
   deleteLink,
   createRouter,
   deleteRouter,
+  clearAllTopology,
 } from '../../api/endpoints';
 import type { Topology } from '../../types';
 import { SkeletonCard, ErrorBanner } from '../../components/Shared';
@@ -130,6 +131,20 @@ export default function TopologyPage() {
   const refreshMut = useMutation({
     mutationFn: () => refreshTopology(),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['topology'] }); flash('Topology refreshed'); },
+  });
+
+  const clearAllMut = useMutation({
+    mutationFn: () => clearAllTopology(),
+    onSuccess: (r) => {
+      qc.setQueryData(['topology'], (old: Topology | undefined) => {
+        if (!old) return old;
+        return { ...old, nodes: [], links: [] };
+      });
+      qc.invalidateQueries({ queryKey: ['topology'] });
+      flash(r.data.message);
+      setPropertiesNode(null);
+    },
+    onError: (e: any) => flash(e?.response?.data?.detail ?? 'Failed to clear topology', 'err'),
   });
 
   const createSwitchMut = useMutation({
@@ -739,6 +754,18 @@ export default function TopologyPage() {
             style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, cursor: 'pointer', background: 'linear-gradient(135deg, #3b82f622, #a78bfa22)', border: '1px solid rgba(139,92,246,0.3)', color: '#a78bfa', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
             🏗️ Auto Layout
           </button>
+          <button
+            onClick={() => {
+              if (nodes.length === 0) { flash('Nothing to clear', 'err'); return; }
+              if (confirm(`Clear ALL topology?\n\nThis will delete:\n• All OVS bridges (switches)\n• All network namespaces (hosts & routers)\n• All veth links\n• All FRR instances in routers\n\nMain FRR router will NOT be affected.`)) {
+                clearAllMut.mutate();
+              }
+            }}
+            disabled={clearAllMut.isPending}
+            title="Delete all switches, hosts, routers, and links"
+            style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, cursor: 'pointer', background: '#ef444415', border: '1px solid #ef444433', color: '#ef4444', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4, opacity: clearAllMut.isPending ? 0.5 : 1 }}>
+            {clearAllMut.isPending ? '⏳ Clearing…' : '💥 Clear All'}
+          </button>
           <button onClick={() => refreshMut.mutate()} disabled={refreshMut.isPending}
             style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, cursor: 'pointer', background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', color: 'var(--color-text)', opacity: refreshMut.isPending ? 0.5 : 1 }}>
             {refreshMut.isPending ? '↻ Refreshing…' : '↻ Refresh'}
@@ -873,6 +900,22 @@ export default function TopologyPage() {
                   v != null ? <PropRow key={k} label={k} value={String(v)} /> : null
                 )}
               </div>
+              {/* FRR Info for VRouter */}
+              {propertiesNode.type === 'router' && propertiesNode.id.startsWith('vrouter-') && (
+                <div style={{ marginTop: 12, padding: '8px 10px', background: 'rgba(34,197,94,0.08)', borderRadius: 6, border: '1px solid rgba(34,197,94,0.15)' }}>
+                  <div style={{ fontWeight: 600, fontSize: 11, color: '#22c55e', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span>🦓</span> FRR Routing Suite
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
+                    <div>Daemons: zebra, bgpd, ospfd, staticd</div>
+                    <div style={{ marginTop: 4 }}>
+                      CLI: <code style={{ background: 'rgba(255,255,255,0.06)', padding: '1px 4px', borderRadius: 3, fontSize: 10 }}>
+                        ip netns exec {propertiesNode.name} vtysh -N {propertiesNode.name}
+                      </code>
+                    </div>
+                  </div>
+                </div>
+              )}
               {/* Connected Links */}
               <div style={{ marginTop: 16 }}>
                 <div style={{ fontWeight: 600, marginBottom: 6, color: 'var(--color-text-muted)' }}>Connected Links</div>
@@ -1031,8 +1074,8 @@ export default function TopologyPage() {
             <span style={{ color: '#22c55e' }}>🔀</span> Create Virtual Router
           </h3>
           <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 16, padding: '8px 12px', background: 'rgba(34,197,94,0.08)', borderRadius: 8, border: '1px solid rgba(34,197,94,0.2)', lineHeight: 1.6 }}>
-            Creates a Linux network namespace with <strong>IP forwarding enabled</strong>.<br />
-            Link the router to switches — each link creates a separate interface with its own IP.
+            Creates a Linux network namespace with <strong>IP forwarding</strong> + <strong>FRR daemons</strong> (zebra, bgpd, ospfd, staticd).<br />
+            Link to switches to create interfaces. Configure routing via: <code style={{ background: 'rgba(255,255,255,0.08)', padding: '1px 4px', borderRadius: 3, fontSize: 11 }}>ip netns exec &lt;name&gt; vtysh -N &lt;name&gt;</code>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             <FieldLabel label="Router Name *">

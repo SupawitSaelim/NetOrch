@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import random
+import re as _re
 import string
 from typing import Any
 
@@ -88,6 +89,54 @@ async def _host_exists(name: str) -> bool:
     """Check if a host network namespace exists."""
     r = await ssh_exec(f"ip netns list | grep -w {name}")
     return r.returncode == 0 and name in r.stdout
+
+
+_FRR_BIN = "/usr/lib/frr"  # FRR binary dir on RHEL
+_FRR_DAEMONS = ["zebra", "staticd", "bgpd", "ospfd"]
+
+
+async def _start_frr_in_netns(name: str) -> str:
+    """Start FRR daemons (zebra, staticd, bgpd, ospfd) inside a netns."""
+    conf_dir = f"/etc/frr/{name}"
+    run_dir = f"/var/run/frr/{name}"
+
+    # Create dirs
+    await ssh_exec(f"mkdir -p {conf_dir} {run_dir}")
+
+    # Write integrated config
+    frr_conf = (
+        f"frr defaults traditional\n"
+        f"hostname {name}\n"
+        f"log syslog informational\n"
+        f"!\n"
+    )
+    await ssh_exec(f"cat > {conf_dir}/frr.conf << 'FRREOF'\n{frr_conf}FRREOF")
+
+    # Write vtysh.conf
+    await ssh_exec(f"cat > {conf_dir}/vtysh.conf << 'FRREOF'\nhostname {name}\nFRREOF")
+
+    # Start each daemon in the netns
+    started = []
+    for daemon in _FRR_DAEMONS:
+        r = await ssh_exec(
+            f"ip netns exec {name} {_FRR_BIN}/{daemon} -d -N {name} -A 127.0.0.1 2>&1"
+        )
+        if r.returncode == 0:
+            started.append(daemon)
+        else:
+            logger.warning("Failed to start %s in %s: %s", daemon, name, r.stderr or r.stdout)
+
+    logger.info("Started FRR in netns %s: %s", name, started)
+    return ", ".join(started)
+
+
+async def _stop_frr_in_netns(name: str) -> None:
+    """Stop FRR daemons for a given netns and clean up configs."""
+    for daemon in _FRR_DAEMONS:
+        await ssh_exec(f"pkill -f '{daemon}.*-N {name}' 2>/dev/null")
+    # Clean up config and runtime dirs
+    await ssh_exec(f"rm -rf /etc/frr/{name} /var/run/frr/{name} 2>/dev/null")
+    logger.info("Stopped FRR in netns %s", name)
 
 
 # ── Switch (OVS Bridge) CRUD ────────────────────────────────────
@@ -277,6 +326,9 @@ async def create_router(
     # Bring up loopback
     await ssh_exec(f"ip netns exec {name} ip link set lo up")
 
+    # Start FRR daemons inside the namespace
+    frr_started = await _start_frr_in_netns(name)
+
     # Save position
     if req.x is not None and req.y is not None:
         topo = await orch.topology.get_topology()
@@ -287,15 +339,23 @@ async def create_router(
                 )
                 break
 
-    logger.info("Created virtual router: %s", name)
-    return {"success": True, "message": f"Router '{name}' created", "name": name}
+    logger.info("Created virtual router: %s (FRR: %s)", name, frr_started)
+    return {
+        "success": True,
+        "message": f"Router '{name}' created with FRR ({frr_started})",
+        "name": name,
+        "frr_daemons": frr_started,
+    }
 
 
 @router.delete("/routers/{name}")
 async def delete_router(name: str):
-    """Delete a virtual router (netns) and clean up all its interfaces."""
+    """Delete a virtual router (netns), stop FRR, and clean up."""
     if not await _host_exists(name):
         raise HTTPException(404, detail=f"Router '{name}' not found")
+
+    # Stop FRR daemons first
+    await _stop_frr_in_netns(name)
 
     # Find and remove all veth interfaces on the host side
     list_r = await ssh_exec(
@@ -531,9 +591,81 @@ async def list_hosts():
                 ip_r = await ssh_exec(f"ip netns exec {name} ip -4 addr show 2>/dev/null | grep inet | grep -v 127.0.0.1")
                 ip_addr = ""
                 if ip_r.returncode == 0 and ip_r.stdout.strip():
-                    import re
-                    m = re.search(r'inet (\S+)', ip_r.stdout)
+                    m = _re.search(r'inet (\\S+)', ip_r.stdout)
                     if m:
                         ip_addr = m.group(1)
                 hosts.append({"name": name, "ip": ip_addr})
     return {"hosts": hosts, "total": len(hosts)}
+
+
+# ── Clear All Topology ───────────────────────────────────────────
+
+@router.delete("/all")
+async def clear_all_topology():
+    """Delete ALL builder-created items: OVS bridges, netns, veths.
+
+    Leaves main FRR router and physical interfaces untouched.
+    """
+    removed_bridges: list[str] = []
+    removed_namespaces: list[str] = []
+    errors: list[str] = []
+
+    # 1) Stop FRR instances for all netns
+    ns_r = await ssh_exec("ip netns list 2>/dev/null")
+    if ns_r.returncode == 0:
+        for line in ns_r.stdout.splitlines():
+            ns_name = line.split()[0].strip() if line.strip() else ""
+            if not ns_name:
+                continue
+            # Stop FRR and clean configs
+            await _stop_frr_in_netns(ns_name)
+            # Remove any veths beloning to this namespace
+            veth_r = await ssh_exec(
+                f"ip -o link show 2>/dev/null | grep -oP '{ns_name}-veth\\S*'"
+            )
+            if veth_r.returncode == 0 and veth_r.stdout.strip():
+                for veth in veth_r.stdout.strip().splitlines():
+                    veth = veth.strip()
+                    if veth:
+                        await ovs_exec(f"ovs-vsctl --if-exists del-port {veth}")
+                        await ssh_exec(f"ip link del {veth} 2>/dev/null")
+            # Delete namespace
+            r = await ssh_exec(f"ip netns del {ns_name} 2>/dev/null")
+            if r.returncode == 0:
+                removed_namespaces.append(ns_name)
+            else:
+                errors.append(f"netns {ns_name}: {r.stderr}")
+
+    # 2) Delete all OVS bridges
+    br_r = await ovs_exec("ovs-vsctl list-br 2>/dev/null")
+    if br_r.returncode == 0:
+        for br_name in br_r.stdout.splitlines():
+            br_name = br_name.strip()
+            if not br_name:
+                continue
+            r = await ovs_exec(f"ovs-vsctl --if-exists del-br {br_name}")
+            if r.returncode == 0:
+                removed_bridges.append(br_name)
+            else:
+                errors.append(f"bridge {br_name}: {r.stderr}")
+
+    # 3) Clean up any orphaned veths
+    await ssh_exec(
+        "ip -o link show type veth 2>/dev/null | awk -F': ' '{print $2}' "
+        "| while read v; do ip link del \"$v\" 2>/dev/null; done"
+    )
+
+    total = len(removed_bridges) + len(removed_namespaces)
+    logger.info(
+        "Clear all topology: %d bridges, %d namespaces removed",
+        len(removed_bridges), len(removed_namespaces),
+    )
+    return {
+        "success": True,
+        "message": f"Cleared {total} items"
+                   f" ({len(removed_bridges)} bridges,"
+                   f" {len(removed_namespaces)} namespaces)",
+        "removed_bridges": removed_bridges,
+        "removed_namespaces": removed_namespaces,
+        "errors": errors,
+    }
