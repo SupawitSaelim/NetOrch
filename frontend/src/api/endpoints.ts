@@ -87,3 +87,52 @@ export const configureVRFBGP = (
 
 export const getVRFRoutes = (name: string) =>
   client.get<{ routes: unknown; routes_raw?: string; total: number }>(`/vrf/${name}/routes`);
+
+// --- Topology Builder ---
+export const createSwitch = (data: {
+  name: string;
+  x?: number;
+  y?: number;
+  protocols?: string;
+  controller?: string;
+}) => client.post<{ success: boolean; message: string; name: string }>('/topology/builder/switches', data);
+
+export const deleteSwitch = (name: string) =>
+  client.delete<{ success: boolean; message: string }>(`/topology/builder/switches/${name}`);
+
+export const createHost = (data: {
+  name: string;
+  ip?: string;
+  x?: number;
+  y?: number;
+  gateway?: string;
+}) =>
+  client.post<{ success: boolean; message: string; name: string; veth_host: string; veth_ns: string }>(
+    '/topology/builder/hosts',
+    data,
+  );
+
+export const deleteHost = (name: string) =>
+  client.delete<{ success: boolean; message: string }>(`/topology/builder/hosts/${name}`);
+
+export const listHosts = () =>
+  client.get<{ hosts: { name: string; ip: string }[]; total: number }>('/topology/builder/hosts');
+
+export const createLink = (data: {
+  source_id: string;
+  target_id: string;
+  source_name: string;
+  target_name: string;
+}) =>
+  client.post<{ success: boolean; message: string; link_type: string }>(
+    '/topology/builder/links',
+    data,
+  );
+
+export const deleteLink = (sourceName: string, targetName: string) =>
+  client.delete<{ success: boolean; message: string }>('/topology/builder/links', {
+    params: { source_name: sourceName, target_name: targetName },
+  });
+
+export const saveTopologyPositions = (positions: Record<string, { x: number; y: number }>) =>
+  client.put<{ success: boolean; updated: number }>('/topology/builder/positions', { positions });
