@@ -9,6 +9,7 @@ const RoutingPage = lazy(() => import('./features/routing/RoutingPage'));
 const FlowsPage = lazy(() => import('./features/flows/FlowsPage'));
 const MonitoringPage = lazy(() => import('./features/monitoring/MonitoringPage'));
 const TerminalPage = lazy(() => import('./features/terminal/TerminalPage'));
+const RouterTerminalPage = lazy(() => import('./features/terminal/RouterTerminalPage'));
 const RoutersPage = lazy(() => import('./features/routers/RoutersPage'));
 const LearnPage = lazy(() => import('./features/learn/LearnPage'));
 const LabsPage = lazy(() => import('./features/labs/LabsPage'));
@@ -80,6 +81,14 @@ export default function App() {
           element={
             <Suspense fallback={<Loading />}>
               <TerminalPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="terminal/router/:routerName"
+          element={
+            <Suspense fallback={<Loading />}>
+              <RouterTerminalPage />
             </Suspense>
           }
         />

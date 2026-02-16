@@ -105,6 +105,9 @@ export default function TopologyPage() {
   // ── Properties panel ──
   const [propertiesNode, setPropertiesNode] = useState<SimNode | null>(null);
 
+  // ── Context menu ──
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: SimNode } | null>(null);
+
   // ── D3 refs ──
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -609,6 +612,14 @@ export default function TopologyPage() {
       d3.select(event.currentTarget as Element).select('.select-ring').attr('opacity', 1);
     });
 
+    // ── Right-click context menu (routers only) ──
+    nodeGs.on('contextmenu', function (event: MouseEvent, d: SimNode) {
+      event.preventDefault();
+      if (d.type === 'router' && d.id.startsWith('vrouter-')) {
+        setContextMenu({ x: event.clientX, y: event.clientY, node: d });
+      }
+    });
+
     // ── Drag (select mode) ──
     const drag = d3.drag<SVGGElement, SimNode>()
       .on('start', (event, d) => {
@@ -865,6 +876,57 @@ export default function TopologyPage() {
             </div>
           )}
           <svg ref={svgRef} width={dimensions.width} height={dimensions.height} style={{ display: 'block', width: '100%', height: '100%' }} />
+
+          {/* Context Menu */}
+          {contextMenu && (
+            <>
+              <div onClick={() => setContextMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 100 }} />
+              <div style={{
+                position: 'fixed', left: contextMenu.x, top: contextMenu.y, zIndex: 101,
+                background: 'var(--color-bg-card, #1e293b)', border: '1px solid var(--color-border, #334155)',
+                borderRadius: 10, padding: 4, minWidth: 180, boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+                backdropFilter: 'blur(12px)',
+              }}>
+                <div style={{ padding: '6px 12px', fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600, borderBottom: '1px solid var(--color-border, #334155)' }}>
+                  🔀 {contextMenu.node.name}
+                </div>
+                <button
+                  onClick={() => {
+                    window.open(`/terminal/router/${contextMenu.node.name}`, '_blank');
+                    setContextMenu(null);
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px',
+                    border: 'none', background: 'transparent', color: 'var(--color-text)', fontSize: 13,
+                    cursor: 'pointer', borderRadius: 6, textAlign: 'left',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.15)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <span style={{ fontSize: 16 }}>💻</span>
+                  Open CLI Terminal
+                  <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--color-text-muted)' }}>↗ new tab</span>
+                </button>
+                <button
+                  onClick={() => {
+                    window.open(`/terminal/router/${contextMenu.node.name}?shell=bash`, '_blank');
+                    setContextMenu(null);
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.15)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px',
+                    border: 'none', background: 'transparent', color: 'var(--color-text)', fontSize: 13,
+                    cursor: 'pointer', borderRadius: 6, textAlign: 'left',
+                  }}
+                >
+                  <span style={{ fontSize: 16 }}>🐚</span>
+                  Open Bash Shell
+                  <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--color-text-muted)' }}>↗ new tab</span>
+                </button>
+              </div>
+            </>
+          )}
 
           {/* Tooltip */}
           {tooltip && (
