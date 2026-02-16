@@ -527,46 +527,40 @@ async def create_link(
     # ── vrouter ↔ vrouter (direct veth pair between namespaces) ──
     if src_type == "vrouter" and tgt_type == "vrouter":
         suffix = _rand_suffix(4)
-        # Create veth pair: one end per router namespace
-        src_eth = f"{src_name}-eth-{tgt_name[:8]}-{suffix}"
-        tgt_eth = f"{tgt_name}-eth-{src_name[:8]}-{suffix}"
-        veth_host_a = f"vr-{suffix}-a"
-        veth_host_b = f"vr-{suffix}-b"
+        # Use short names (Linux 15-char limit): vr-XXXX-a / vr-XXXX-b
+        veth_a = f"vr-{suffix}-a"
+        veth_b = f"vr-{suffix}-b"
 
         # Create veth pair on host
-        r = await ssh_exec(f"ip link add {veth_host_a} type veth peer name {veth_host_b}")
+        r = await ssh_exec(f"ip link add {veth_a} type veth peer name {veth_b}")
         if r.returncode != 0:
             raise HTTPException(500, detail=f"Failed to create veth pair: {r.stderr}")
 
         # Move each end to its router namespace
-        r1 = await ssh_exec(f"ip link set {veth_host_a} netns {src_name}")
-        r2 = await ssh_exec(f"ip link set {veth_host_b} netns {tgt_name}")
+        r1 = await ssh_exec(f"ip link set {veth_a} netns {src_name}")
+        r2 = await ssh_exec(f"ip link set {veth_b} netns {tgt_name}")
         if r1.returncode != 0 or r2.returncode != 0:
-            await ssh_exec(f"ip link del {veth_host_a} 2>/dev/null")
-            await ssh_exec(f"ip link del {veth_host_b} 2>/dev/null")
+            await ssh_exec(f"ip link del {veth_a} 2>/dev/null")
+            await ssh_exec(f"ip link del {veth_b} 2>/dev/null")
             raise HTTPException(500, detail=f"Failed to move interfaces to namespaces")
 
-        # Rename inside namespaces for clarity
-        await ssh_exec(f"ip netns exec {src_name} ip link set {veth_host_a} name {src_eth}")
-        await ssh_exec(f"ip netns exec {tgt_name} ip link set {veth_host_b} name {tgt_eth}")
-
-        # Bring up
-        await ssh_exec(f"ip netns exec {src_name} ip link set {src_eth} up")
-        await ssh_exec(f"ip netns exec {tgt_name} ip link set {tgt_eth} up")
+        # Bring up (names stay as vr-XXXX-a/b inside namespace)
+        await ssh_exec(f"ip netns exec {src_name} ip link set {veth_a} up")
+        await ssh_exec(f"ip netns exec {tgt_name} ip link set {veth_b} up")
 
         # Assign IPs if provided
         if req.ip:
-            await ssh_exec(f"ip netns exec {src_name} ip addr add {req.ip} dev {src_eth}")
+            await ssh_exec(f"ip netns exec {src_name} ip addr add {req.ip} dev {veth_a}")
         if req.target_ip:
-            await ssh_exec(f"ip netns exec {tgt_name} ip addr add {req.target_ip} dev {tgt_eth}")
+            await ssh_exec(f"ip netns exec {tgt_name} ip addr add {req.target_ip} dev {veth_b}")
 
-        logger.info("Linked router %s ↔ %s (direct veth)", src_name, tgt_name)
+        logger.info("Linked router %s ↔ %s (direct veth: %s, %s)", src_name, tgt_name, veth_a, veth_b)
         return {
             "success": True,
             "message": f"Linked {src_name} ↔ {tgt_name}"
                        + (f" (IPs: {req.ip}, {req.target_ip})" if req.ip else ""),
             "link_type": "router-router",
-            "interfaces": {src_name: src_eth, tgt_name: tgt_eth},
+            "interfaces": {src_name: veth_a, tgt_name: veth_b},
         }
 
     raise HTTPException(400, detail=f"Unsupported link: {src_type} ↔ {tgt_type}")

@@ -346,7 +346,44 @@ class TopologyService:
                                 n["metadata"].update(meta)
                                 break
 
-            # ---- 6) Physical uplink interface (enp0s*) ----
+            # ---- 6) Router-to-router direct links (veth between namespaces) ----
+            r2r_seen: set[tuple[str, str]] = set()
+            for rname in vrouter_names:
+                vrouter_id = f"vrouter-{rname}"
+                # List interfaces in this namespace that link to another namespace
+                ifaces_r = await ssh_exec(
+                    f"ip netns exec {rname} ip -o link show 2>/dev/null"
+                )
+                if ifaces_r.returncode != 0:
+                    continue
+                for iline in ifaces_r.stdout.splitlines():
+                    # Match: "NN: vr-xxxx-a@ifNN: ... link-netns routerY"
+                    m = re.search(r'(\S+)@\S+:.*link-netns\s+(\S+)', iline)
+                    if not m:
+                        continue
+                    iface_name = m.group(1)
+                    peer_ns = m.group(2)
+                    # Only create link if peer is also a vrouter
+                    if peer_ns not in vrouter_names:
+                        continue
+                    peer_id = f"vrouter-{peer_ns}"
+                    # Avoid duplicates (sorted pair key)
+                    link_key = tuple(sorted([vrouter_id, peer_id]))
+                    if link_key in r2r_seen:
+                        continue
+                    r2r_seen.add(link_key)
+                    # Ensure both nodes exist
+                    _add_node(vrouter_id, "router", rname)
+                    _add_node(peer_id, "router", peer_ns)
+                    # Check link state
+                    st_r = await ssh_exec(
+                        f"ip netns exec {rname} cat /sys/class/net/{iface_name}/operstate 2>/dev/null || echo unknown"
+                    )
+                    lstatus = "up" if st_r.stdout.strip() in ("up", "unknown") else "down"
+                    _add_link(vrouter_id, peer_id, iface_name, iface_name,
+                              bw=1000, status=lstatus)
+
+            # ---- 7) Physical uplink interface (enp0s*) ----
             iface_r = await ssh_exec("ip -br link | grep '^enp'")
             if iface_r.returncode == 0:
                 for iline in iface_r.stdout.splitlines():
