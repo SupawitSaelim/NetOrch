@@ -75,6 +75,12 @@ async def terminal_ws(ws: WebSocket):
         proc = await _open_ssh_process(shell, netns=netns)
         logger.info("Terminal session started (shell=%s, netns=%s, pid=%s)", shell, netns or "host", proc.pid)
 
+        # Check if process exited immediately
+        if proc.returncode is not None:
+            logger.error("SSH process exited immediately with code %s", proc.returncode)
+            await ws.close(code=1011, reason="SSH process failed to start")
+            return
+
         async def _read_loop():
             """Read from SSH stdout and send to browser."""
             assert proc and proc.stdout

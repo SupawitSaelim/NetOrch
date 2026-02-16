@@ -11,6 +11,7 @@ export default function RouterTerminalPage() {
   const termInstance = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddon = useRef<FitAddon | null>(null);
+  const mountedRef = useRef(false);
   const [connected, setConnected] = useState(false);
   const [disconnected, setDisconnected] = useState(false);
 
@@ -18,10 +19,26 @@ export default function RouterTerminalPage() {
     if (!routerName) return;
 
     setDisconnected(false);
+    setConnected(false);
 
-    // Cleanup previous
-    if (wsRef.current) wsRef.current.close();
-    if (termInstance.current) termInstance.current.dispose();
+    // Cleanup previous WebSocket — suppress its onclose
+    if (wsRef.current) {
+      wsRef.current.onclose = null;
+      wsRef.current.onerror = null;
+      wsRef.current.close();
+      wsRef.current = null;
+    }
+
+    // Cleanup previous terminal
+    if (termInstance.current) {
+      termInstance.current.dispose();
+      termInstance.current = null;
+    }
+
+    // Clear any leftover DOM in the terminal container
+    if (termRef.current) {
+      termRef.current.innerHTML = '';
+    }
 
     const term = new Terminal({
       cursorBlink: true,
@@ -64,7 +81,10 @@ export default function RouterTerminalPage() {
     const ws = new WebSocket(url);
     ws.binaryType = 'arraybuffer';
 
+    console.log(`[RouterTerminal] Connecting to ${url}`);
+
     ws.onopen = () => {
+      console.log('[RouterTerminal] WS connected');
       setConnected(true);
       term.focus();
     };
@@ -77,16 +97,20 @@ export default function RouterTerminalPage() {
       }
     };
 
-    ws.onclose = () => {
-      setConnected(false);
-      setDisconnected(true);
-      term.dispose();
-      termInstance.current = null;
+    ws.onclose = (ev) => {
+      console.warn(`[RouterTerminal] WS closed: code=${ev.code} reason="${ev.reason}" wasClean=${ev.wasClean}`);
+      if (mountedRef.current) {
+        setConnected(false);
+        setDisconnected(true);
+      }
     };
 
-    ws.onerror = () => {
-      setConnected(false);
-      setDisconnected(true);
+    ws.onerror = (ev) => {
+      console.error('[RouterTerminal] WS error:', ev);
+      if (mountedRef.current) {
+        setConnected(false);
+        setDisconnected(true);
+      }
     };
 
     wsRef.current = ws;
@@ -108,6 +132,7 @@ export default function RouterTerminalPage() {
   }, [routerName]);
 
   useEffect(() => {
+    mountedRef.current = true;
     connect();
 
     const handleResize = () => fitAddon.current?.fit();
@@ -117,9 +142,19 @@ export default function RouterTerminalPage() {
     if (routerName) document.title = `${routerName} — CLI`;
 
     return () => {
+      mountedRef.current = false;
       window.removeEventListener('resize', handleResize);
-      wsRef.current?.close();
-      termInstance.current?.dispose();
+      // Suppress onclose so StrictMode cleanup doesn't trigger "disconnected"
+      if (wsRef.current) {
+        wsRef.current.onclose = null;
+        wsRef.current.onerror = null;
+        wsRef.current.close();
+        wsRef.current = null;
+      }
+      if (termInstance.current) {
+        termInstance.current.dispose();
+        termInstance.current = null;
+      }
     };
   }, [routerName, connect]);
 
