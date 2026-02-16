@@ -91,7 +91,7 @@ async def _host_exists(name: str) -> bool:
     return r.returncode == 0 and name in r.stdout
 
 
-_FRR_BIN = "/usr/lib/frr"  # FRR binary dir on RHEL
+_FRR_BIN = "/usr/libexec/frr"  # FRR binary dir on RHEL
 _FRR_DAEMONS = ["zebra", "staticd", "bgpd", "ospfd"]
 
 
