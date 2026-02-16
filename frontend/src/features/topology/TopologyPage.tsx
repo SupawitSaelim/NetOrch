@@ -188,7 +188,7 @@ export default function TopologyPage() {
           ...old,
           nodes: [...old.nodes, {
             id: hostId, type: 'host' as const, name: vethName,
-            dpid: null, metadata: { x: vars.x ?? 400, y: vars.y ?? 400, ip: vars.ip },
+            dpid: null, metadata: { x: vars.x ?? 400, y: vars.y ?? 400, ip: vars.ip, gateway: vars.gateway },
           }],
         };
       });
@@ -603,6 +603,45 @@ export default function TopologyPage() {
     { mode: 'delete', icon: '🗑', label: 'Delete', color: '#ef4444' },
   ];
 
+  // ── Auto-layout: arrange nodes in layered rows by type ──
+  const handleAutoLayout = useCallback(() => {
+    const layerOrder: Record<string, number> = { network: 0, router: 1, switch: 2, host: 3 };
+    const layerY: Record<number, number> = { 0: 80, 1: 220, 2: 360, 3: 500 };
+    const w = dimensions.width;
+
+    // Group nodes by layer
+    const layers: Record<number, typeof nodes> = {};
+    for (const n of nodes) {
+      const layer = layerOrder[n.type] ?? 3;
+      (layers[layer] ??= []).push(n);
+    }
+
+    const newPositions: Record<string, { x: number; y: number }> = {};
+    for (const [layerStr, group] of Object.entries(layers)) {
+      const y = layerY[Number(layerStr)] ?? 400;
+      const count = group.length;
+      const spacing = Math.min(180, (w - 100) / Math.max(count, 1));
+      const startX = w / 2 - ((count - 1) * spacing) / 2;
+      group.forEach((n, i) => {
+        newPositions[n.id] = { x: startX + i * spacing, y };
+      });
+    }
+
+    // Update cache optimistically so D3 re-renders immediately
+    qc.setQueryData(['topology'], (old: Topology | undefined) => {
+      if (!old) return old;
+      return {
+        ...old,
+        nodes: old.nodes.map(n => {
+          const pos = newPositions[n.id];
+          return pos ? { ...n, metadata: { ...n.metadata, x: pos.x, y: pos.y } } : n;
+        }),
+      };
+    });
+
+    flash('Layout adjusted');
+  }, [nodes, dimensions.width, qc, flash]);
+
   /* ═══════════ RENDER ═══════════ */
   return (
     <div>
@@ -610,6 +649,10 @@ export default function TopologyPage() {
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>🌐 Network Topology Builder</h2>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <button onClick={handleAutoLayout} title="Auto-arrange nodes by type layer"
+            style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, cursor: 'pointer', background: 'linear-gradient(135deg, #3b82f622, #a78bfa22)', border: '1px solid rgba(139,92,246,0.3)', color: '#a78bfa', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+            🏗️ Auto Layout
+          </button>
           <button onClick={() => refreshMut.mutate()} disabled={refreshMut.isPending}
             style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, cursor: 'pointer', background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', color: 'var(--color-text)', opacity: refreshMut.isPending ? 0.5 : 1 }}>
             {refreshMut.isPending ? '↻ Refreshing…' : '↻ Refresh'}
@@ -688,8 +731,22 @@ export default function TopologyPage() {
               <div style={{ color: '#94a3b8', lineHeight: 1.8 }}>
                 <div><b>Type:</b> <span style={{ textTransform: 'capitalize' }}>{tooltip.node.type}</span></div>
                 {tooltip.node.dpid && <div><b>DPID:</b> <span style={{ fontFamily: 'monospace' }}>{tooltip.node.dpid}</span></div>}
-                {tooltip.node.metadata.ip != null && <div><b>IP:</b> {String(tooltip.node.metadata.ip)}</div>}
+                {tooltip.node.metadata.ip != null && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <b>IP/Subnet:</b>
+                    <span style={{ fontFamily: 'monospace', color: '#38bdf8' }}>{String(tooltip.node.metadata.ip)}</span>
+                  </div>
+                )}
+                {tooltip.node.metadata.gateway != null && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <b>Gateway:</b>
+                    <span style={{ fontFamily: 'monospace', color: '#34d399' }}>{String(tooltip.node.metadata.gateway)}</span>
+                  </div>
+                )}
                 {tooltip.node.metadata.bridge != null && <div><b>Bridge:</b> {String(tooltip.node.metadata.bridge)}</div>}
+                {tooltip.node.type === 'host' && !tooltip.node.metadata.ip && (
+                  <div style={{ color: '#f59e0b', fontStyle: 'italic', fontSize: 11 }}>No IP assigned</div>
+                )}
               </div>
             </div>
           )}

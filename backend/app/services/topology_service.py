@@ -220,15 +220,22 @@ class TopologyService:
                             f"ip netns exec {ns_name} ip -4 addr show dev {ns_name}-eth0 2>/dev/null"
                             " | grep inet | awk '{print $2}'")
                         host_ip = ip_r.stdout.strip() if ip_r.returncode == 0 else ""
+                        # Get default gateway
+                        gw_r = await ssh_exec(
+                            f"ip netns exec {ns_name} ip route show default 2>/dev/null"
+                            " | awk '/default via/ {print $3}'")
+                        host_gw = gw_r.stdout.strip() if gw_r.returncode == 0 else ""
                         meta: dict[str, Any] = {}
                         if host_ip:
                             meta["ip"] = host_ip
+                        if host_gw:
+                            meta["gateway"] = host_gw
                         # Check if veth exists on host side
                         vstate_r = await ssh_exec(
                             f"cat /sys/class/net/{veth_host}/operstate 2>/dev/null || echo down")
                         vstatus = "up" if vstate_r.stdout.strip() in ("up", "unknown") else "down"
                         _add_node(host_id, "host", veth_host)
-                        # Store IP in metadata
+                        # Store IP + gateway in metadata
                         for n in nodes:
                             if n["id"] == host_id:
                                 n["metadata"].update(meta)
