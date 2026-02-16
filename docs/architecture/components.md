@@ -2,103 +2,124 @@
 
 ## 1. Overview
 
-This document provides detailed specifications for each component in the Hybrid SDN Orchestration Platform.
+This document provides detailed specifications for each component in the NetOrch platform, matching the current codebase implementation.
 
 ## 2. Frontend (React Application)
 
 ### 2.1 Technology Stack
 
-| Technology | Purpose |
-|------------|---------|
-| React 18+ | UI Framework |
-| TypeScript | Type Safety |
-| Vite | Build Tool |
-| React Router | Navigation |
-| TanStack Query | Data Fetching/Caching |
-| Zustand | State Management |
-| Tailwind CSS | Styling |
-| vis.js / D3.js | Topology Visualization |
-| Axios | HTTP Client |
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| React | 19.2.x | UI Framework |
+| TypeScript | 5.9.x | Type Safety |
+| Vite | 7.3.x | Build Tool |
+| react-router-dom | 7.13.x | Client-side Routing |
+| @tanstack/react-query | 5.90.x | Data Fetching/Caching |
+| Zustand | 5.0.x | State Management |
+| Tailwind CSS | 4.1.x | Styling |
+| D3.js | 7.9.x | Topology Visualization |
+| Chart.js + react-chartjs-2 | 4.5.x / 5.3.x | Monitoring Charts |
+| @xterm/xterm | 6.0.x | Terminal Emulator |
+| Axios | 1.13.x | HTTP Client |
 
 ### 2.2 Application Structure
 
 ```
-frontend/
-├── public/
-├── src/
-│   ├── api/                 # API client modules
-│   │   ├── client.ts        # Axios instance
-│   │   ├── routing.ts       # Routing API calls
-│   │   ├── sdn.ts           # SDN API calls
-│   │   ├── topology.ts      # Topology API calls
-│   │   └── types.ts         # API response types
-│   │
-│   ├── components/          # Reusable UI components
-│   │   ├── common/          # Buttons, Forms, Modals
-│   │   ├── layout/          # Header, Sidebar, Footer
-│   │   ├── topology/        # Network topology components
-│   │   └── tables/          # Data tables
-│   │
-│   ├── features/            # Feature-based modules
-│   │   ├── dashboard/       # Dashboard feature
-│   │   ├── routing/         # Routing management
-│   │   ├── flows/           # SDN flow management
-│   │   ├── topology/        # Topology view
-│   │   └── monitoring/      # Monitoring & stats
-│   │
-│   ├── hooks/               # Custom React hooks
-│   ├── stores/              # Zustand stores
-│   ├── utils/               # Utility functions
-│   ├── types/               # TypeScript types
-│   │
-│   ├── App.tsx              # Root component
-│   ├── main.tsx             # Entry point
-│   └── router.tsx           # Route definitions
+frontend/src/
+├── api/
+│   ├── client.ts              # Axios instance with base URL + auth interceptor
+│   └── endpoints.ts           # All API endpoint functions
 │
-├── package.json
-├── tsconfig.json
-├── vite.config.ts
-└── tailwind.config.js
+├── components/
+│   ├── Shared.tsx             # Reusable UI components (Skeleton, ErrorBanner, etc.)
+│   └── layout/
+│       ├── Layout.tsx         # Main layout with sidebar + content area
+│       ├── Header.tsx         # Top header bar with auth status
+│       └── Sidebar.tsx        # Navigation sidebar with route links
+│
+├── features/
+│   ├── dashboard/
+│   │   └── Dashboard.tsx      # System overview, health cards, recent events
+│   ├── topology/
+│   │   ├── TopologyPage.tsx   # D3.js interactive topology builder (1,288 lines)
+│   │   └── TopologyDetailsPage.tsx  # Topology details table view
+│   ├── routing/
+│   │   └── RoutingPage.tsx    # Route table, BGP summary, OSPF neighbors
+│   ├── flows/
+│   │   └── FlowsPage.tsx     # SDN flow rules CRUD (456 lines)
+│   ├── monitoring/
+│   │   └── MonitoringPage.tsx # CPU/memory charts, event log, health cards
+│   ├── terminal/
+│   │   ├── TerminalPage.tsx   # xterm.js SSH terminal to VM
+│   │   └── RouterTerminalPage.tsx  # Fullscreen router vtysh terminal
+│   ├── routers/
+│   │   └── RoutersPage.tsx    # Virtual router management (list/create/delete)
+│   ├── learn/
+│   │   └── LearnPage.tsx      # Educational content (SDN, BGP, OSPF, etc.)
+│   ├── labs/
+│   │   ├── LabsPage.tsx       # Lab scenario listing
+│   │   ├── LabDetailPage.tsx  # Individual lab with steps
+│   │   └── labData.ts        # Lab content data (800 lines)
+│   └── tools/
+│       └── NetworkToolsPage.tsx  # Ping, traceroute, ARP tools
+│
+├── hooks/
+│   └── useWebSocket.ts       # WebSocket hook with auto-reconnect
+│
+├── stores/
+│   ├── authStore.ts           # Zustand auth store (token, login/logout)
+│   └── appStore.ts            # Zustand app store (sidebar state, etc.)
+│
+├── types/
+│   └── index.ts               # TypeScript interfaces for all API types
+│
+├── App.tsx                    # Route definitions with lazy loading
+├── main.tsx                   # Entry point (React root + StrictMode)
+└── vite-env.d.ts              # Vite type declarations
 ```
 
-### 2.3 Key Features
+### 2.3 Frontend Routes (13 total)
 
-| Feature | Description |
-|---------|-------------|
-| **Dashboard** | Overview of system status, quick stats, alerts |
-| **Topology View** | Interactive network topology visualization |
-| **Routing Config** | BGP/OSPF neighbor management, route tables |
-| **Flow Management** | SDN flow rules, policy configuration |
-| **Monitoring** | Real-time metrics, traffic statistics |
-| **Settings** | System configuration, user preferences |
+All routes use `React.lazy()` with `Suspense` for code splitting.
 
-### 2.4 UI Wireframes
+| Route | Component | Layout | Description |
+|-------|-----------|--------|-------------|
+| `/` | Dashboard | ✅ | System overview dashboard |
+| `/topology` | TopologyPage | ✅ | D3.js topology builder + discovery view |
+| `/topology/details` | TopologyDetailsPage | ✅ | Topology node/link details table |
+| `/routing` | RoutingPage | ✅ | Routing table, BGP, OSPF management |
+| `/flows` | FlowsPage | ✅ | SDN flow rules CRUD |
+| `/monitoring` | MonitoringPage | ✅ | Real-time charts + event log |
+| `/terminal` | TerminalPage | ✅ | SSH terminal to VM |
+| `/routers` | RoutersPage | ✅ | Virtual router management |
+| `/learn` | LearnPage | ✅ | Educational/learning content |
+| `/labs` | LabsPage | ✅ | Lab scenarios listing |
+| `/labs/:labId` | LabDetailPage | ✅ | Individual lab detail |
+| `/tools` | NetworkToolsPage | ✅ | Network diagnostic tools |
+| `/terminal/router/:routerName` | RouterTerminalPage | ❌ (fullscreen) | Router-specific vtysh terminal |
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  [Logo]  Hybrid SDN Platform          [User] [Notifications] ⚙  │
-├────────┬────────────────────────────────────────────────────────┤
-│        │                                                         │
-│ 📊     │  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐    │
-│ Dash   │  │   Nodes     │  │   Links     │  │   Flows     │    │
-│        │  │     12      │  │     24      │  │    156      │    │
-│ 🌐     │  └─────────────┘  └─────────────┘  └─────────────┘    │
-│ Topo   │                                                         │
-│        │  ┌───────────────────────────────────────────────────┐ │
-│ 🛣️     │  │                                                   │ │
-│ Routes │  │              Topology Visualization               │ │
-│        │  │                                                   │ │
-│ 📡     │  │         [Node]────[Link]────[Node]               │ │
-│ Flows  │  │                                                   │ │
-│        │  └───────────────────────────────────────────────────┘ │
-│ 📈     │                                                         │
-│ Monitor│  ┌─────────────────────┐  ┌──────────────────────────┐ │
-│        │  │   Recent Events     │  │   Active Alerts          │ │
-│ ⚙️     │  │   • Link up br0     │  │   ⚠️ High CPU on Ryu    │ │
-│ Config │  │   • BGP peer up     │  │                          │ │
-│        │  └─────────────────────┘  └──────────────────────────┘ │
-└────────┴────────────────────────────────────────────────────────┘
-```
+### 2.4 Key Frontend Features
+
+**Topology Builder (TopologyPage.tsx — 1,288 lines):**
+- D3.js force-directed graph with drag-and-drop
+- Context menu (right-click) for node actions: delete, open terminal, properties
+- Add switches, hosts, routers via toolbar buttons
+- Create links by dragging between nodes
+- Properties panel slides in/out on node selection
+- Auto-layout on first load using D3 force simulation
+- Node position persistence (PATCH to backend)
+- Portal-based context menu rendering (z-index 9999)
+
+**Terminal (xterm.js):**
+- WebSocket-based SSH proxy to VM
+- RouterTerminalPage: fullscreen, no sidebar, opens in new window
+- Handles React StrictMode double-mount via `mountedRef` guard
+- Auto-reconnect with disconnect overlay
+
+**State Management:**
+- `useAuthStore` (Zustand): JWT token, login/logout, persist to localStorage
+- `useAppStore` (Zustand): sidebar collapse state
+- `useWebSocket` hook: connects to `/api/v1/ws`, auto-reconnects, provides `lastMessage`
 
 ---
 
@@ -106,100 +127,143 @@ frontend/
 
 ### 3.1 Technology Stack
 
-| Technology | Purpose |
-|------------|---------|
-| Python 3.11+ | Runtime |
-| FastAPI | Web Framework |
-| Uvicorn | ASGI Server |
-| Pydantic | Data Validation |
-| SQLAlchemy | ORM (optional) |
-| Celery | Background Tasks (optional) |
-| Python-jose | JWT Authentication |
+| Technology | Version | Purpose |
+|------------|---------|---------|
+| Python | 3.11+ (runtime) | Language |
+| FastAPI | 0.128.x | Web Framework |
+| Uvicorn | 0.39.x | ASGI Server |
+| Pydantic | 2.12.x | Data Validation |
+| pydantic-settings | 2.11.x | Settings from env vars |
+| python-jose | 3.5.x | JWT Authentication |
+| httpx | 0.28.x | HTTP Client (for SDN REST API) |
+| Jinja2 | 3.1.x | Template rendering |
+| passlib | 1.7.x | Password hashing |
+| python-multipart | 0.0.20 | Form data parsing |
 
 ### 3.2 Application Structure
 
 ```
 backend/
 ├── app/
-│   ├── api/                  # API routes
-│   │   ├── __init__.py
-│   │   ├── deps.py           # Dependencies
-│   │   ├── v1/
-│   │   │   ├── __init__.py
-│   │   │   ├── router.py     # Main router
-│   │   │   ├── routing.py    # Routing endpoints
-│   │   │   ├── sdn.py        # SDN endpoints
-│   │   │   ├── topology.py   # Topology endpoints
-│   │   │   └── monitoring.py # Monitoring endpoints
-│   │   └── health.py         # Health check
+│   ├── __init__.py
+│   ├── main.py                    # FastAPI app creation, CORS, route registration
 │   │
-│   ├── core/                 # Core configuration
+│   ├── api/
 │   │   ├── __init__.py
-│   │   ├── config.py         # Settings
-│   │   └── security.py       # Auth utilities
+│   │   ├── deps.py                # Dependency injection (get_current_user)
+│   │   ├── health.py              # GET /health, GET /system/info
+│   │   └── v1/
+│   │       ├── __init__.py
+│   │       ├── router.py          # Main v1 router (aggregates all sub-routers)
+│   │       ├── auth.py            # POST /auth/login
+│   │       ├── system.py          # GET/PUT /system/mode
+│   │       ├── routing.py         # 10 routing endpoints (routes, BGP, OSPF)
+│   │       ├── sdn.py             # 11 SDN endpoints (flows, switches, ports)
+│   │       ├── topology.py        # 3 topology endpoints (get, refresh, patch)
+│   │       ├── topology_builder.py # 11 builder endpoints (CRUD for nodes/links)
+│   │       ├── monitoring.py      # 3 monitoring endpoints
+│   │       ├── vrf.py             # 5 VRF endpoints
+│   │       ├── network_tools.py   # 4 network tools endpoints
+│   │       ├── ws.py              # WebSocket broadcast endpoint
+│   │       └── terminal.py        # WebSocket terminal endpoint
 │   │
-│   ├── services/             # Business logic
+│   ├── core/
 │   │   ├── __init__.py
-│   │   ├── orchestrator.py   # Main orchestrator
-│   │   ├── frr_service.py    # FRRouting interface
-│   │   ├── ryu_service.py    # Ryu interface
-│   │   ├── ovs_service.py    # OVS interface
-│   │   └── topology_service.py
+│   │   ├── config.py              # Settings class (pydantic-settings, from .env)
+│   │   └── security.py            # JWT token creation/verification
 │   │
-│   ├── models/               # Data models
+│   ├── models/
+│   │   └── __init__.py
+│   │
+│   ├── schemas/
 │   │   ├── __init__.py
-│   │   ├── routing.py
-│   │   ├── sdn.py
-│   │   └── topology.py
+│   │   ├── common.py              # Shared schemas
+│   │   ├── routing.py             # Routing/BGP/OSPF schemas
+│   │   ├── sdn.py                 # Flow/Switch schemas
+│   │   └── topology.py            # Topology node/link schemas
 │   │
-│   ├── schemas/              # Pydantic schemas
-│   │   ├── __init__.py
-│   │   ├── routing.py
-│   │   ├── sdn.py
-│   │   └── common.py
-│   │
-│   └── main.py               # Application entry
+│   └── services/
+│       ├── __init__.py
+│       ├── orchestrator.py        # Central coordinator for all services
+│       ├── frr_service.py         # FRRouting interface (SSH → vtysh)
+│       ├── ryu_service.py         # OVS flow management (SSH → ovs-ofctl)
+│       ├── ovs_service.py         # OVS bridge/port management (SSH → ovs-vsctl)
+│       ├── topology_service.py    # Topology discovery (408 lines)
+│       └── ssh_utils.py           # SSH command execution utilities
 │
-├── tests/                    # Unit tests
+├── tests/
+│   ├── conftest.py                # Shared fixtures, async client, mock SSH
+│   ├── test_auth.py               # 3 tests
+│   ├── test_health.py             # 3 tests
+│   ├── test_monitoring.py         # 2 tests
+│   ├── test_parsers.py            # 9 tests
+│   ├── test_routing.py            # 7 tests
+│   ├── test_sdn.py                # 5 tests
+│   ├── test_sdn_parsers.py        # 13 tests
+│   └── test_topology.py           # 5 tests
+│
 ├── requirements.txt
-├── Dockerfile
-└── pyproject.toml
+├── pyproject.toml
+└── Dockerfile
 ```
 
 ### 3.3 Service Layer Design
 
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                      OrchestratorService                     │
-│  ┌────────────────────────────────────────────────────────┐ │
-│  │  • Coordinates actions across all sub-services         │ │
-│  │  • Manages system state and configuration              │ │
-│  │  • Handles transaction-like operations                 │ │
-│  └────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
-           │              │               │
-           ▼              ▼               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      OrchestratorService                         │
+│  • Coordinates actions across all sub-services                   │
+│  • Provides get_health(), get_system_info(), get_monitoring_stats │
+│  • Tracks uptime and request_count                               │
+└──────┬──────────────────┬──────────────────┬────────────────────┘
+       │                  │                  │
+       ▼                  ▼                  ▼
 ┌──────────────┐  ┌──────────────┐  ┌──────────────┐
 │  FRRService  │  │  RyuService  │  │  OVSService  │
+│  (SSH+vtysh) │  │ (SSH+ofctl)  │  │ (SSH+vsctl)  │
 ├──────────────┤  ├──────────────┤  ├──────────────┤
-│• get_routes  │  │• get_flows   │  │• list_bridges│
-│• add_neighbor│  │• add_flow    │  │• add_port    │
-│• config_bgp  │  │• del_flow    │  │• del_bridge  │
-│• get_status  │  │• get_stats   │  │• get_flows   │
-└──────────────┘  └──────────────┘  └──────────────┘
+│get_routing   │  │get_flows     │  │list_bridges  │
+│add_static    │  │add_flow      │  │create_bridge │
+│delete_static │  │delete_flow   │  │delete_bridge │
+│get_bgp_*     │  │get_flow_stats│  │add_port      │
+│add/del_bgp   │  │get_switches  │  │delete_port   │
+│get_ospf_*    │  │get_switch    │  │set_controller│
+│get_status    │  │get_status    │  │create_vxlan  │
+└──────────────┘  └──────────────┘  │get_status    │
+                                    └──────────────┘
+       │                  │                  │
+       └──────── All via ssh_utils.py  ──────┘
+                         │
+              ┌──────────▼──────────┐
+              │   TopologyService    │
+              │  (408 lines)         │
+              │  • discover()        │
+              │  • get_topology()    │
+              │  • refresh()         │
+              │  • update_position() │
+              │                      │
+              │  Discovery phases:   │
+              │  1. FRR router       │
+              │  2. OVS bridges      │
+              │  3. Ports & hosts    │
+              │  4. VRouters (netns) │
+              │  5. Network nodes    │
+              │  6. Router links     │
+              │  7. Physical uplinks │
+              └──────────────────────┘
 ```
 
-### 3.4 Key Endpoints
+### 3.4 SSH Utilities
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/api/v1/health` | Health check |
-| GET | `/api/v1/routing/routes` | Get routing table |
-| POST | `/api/v1/routing/neighbors` | Add BGP/OSPF neighbor |
-| GET | `/api/v1/sdn/flows` | Get all flow rules |
-| POST | `/api/v1/sdn/flows` | Add flow rule |
-| GET | `/api/v1/topology` | Get network topology |
-| GET | `/api/v1/monitoring/stats` | Get statistics |
+All VM communication goes through `ssh_utils.py`:
+
+| Function | Description |
+|----------|-------------|
+| `ssh_exec(command, timeout)` | Execute arbitrary command on VM via SSH |
+| `vtysh_exec(command)` | Execute `vtysh -c "..."` on VM |
+| `ovs_exec(command)` | Execute `ovs-vsctl ...` on VM |
+
+Configuration: `VM_HOST`, `VM_USER`, `VM_SSH_KEY` from environment.
 
 ---
 
@@ -207,309 +271,271 @@ backend/
 
 ### 4.1 Overview
 
-FRRouting (FRR) provides the routing protocol implementation (BGP, OSPF, etc.).
+FRRouting (FRR) 10.1 provides routing protocol implementation. The backend communicates via SSH, executing `vtysh` commands on the RHEL VM and parsing the output.
 
-### 4.2 Interface Methods
+### 4.2 FRRService Methods
 
-| Method | Description | Implementation |
-|--------|-------------|----------------|
-| vtysh CLI | Command-line interface | subprocess + parsing |
-| Management Protocol | FRR API (experimental) | HTTP/gRPC |
-| Configuration Files | Direct config modification | Jinja2 templates |
+| Method | Description |
+|--------|-------------|
+| `get_routing_table(protocol?)` | Parse `show ip route` output |
+| `add_static_route(dest, next_hop, metric)` | Configure static route via vtysh |
+| `delete_static_route(dest)` | Remove static route |
+| `get_bgp_summary()` | Parse `show bgp summary` |
+| `get_bgp_neighbors()` | Parse BGP neighbor details |
+| `add_bgp_neighbor(config)` | Add BGP peer via vtysh config mode |
+| `delete_bgp_neighbor(ip)` | Remove BGP peer |
+| `get_ospf_summary()` | Parse `show ip ospf` |
+| `get_ospf_neighbors()` | Parse `show ip ospf neighbor` |
+| `get_status()` | Check FRR daemon connectivity |
 
-### 4.3 FRR Service Interface
+### 4.3 Mock Mode
 
-```python
-class FRRService:
-    """Interface to FRRouting daemon."""
-    
-    async def get_routing_table(self, protocol: str = "all") -> List[Route]:
-        """Get routes from routing table."""
-        
-    async def get_bgp_neighbors(self) -> List[BGPNeighbor]:
-        """Get BGP neighbor status."""
-        
-    async def add_bgp_neighbor(self, neighbor: BGPNeighborConfig) -> bool:
-        """Add BGP neighbor configuration."""
-        
-    async def get_ospf_neighbors(self) -> List[OSPFNeighbor]:
-        """Get OSPF neighbor status."""
-        
-    async def reload_config(self) -> bool:
-        """Reload FRR configuration."""
-```
-
-### 4.4 Configuration Template Example
-
-```jinja2
-! BGP Configuration
-router bgp {{ asn }}
- bgp router-id {{ router_id }}
- {% for neighbor in neighbors %}
- neighbor {{ neighbor.ip }} remote-as {{ neighbor.remote_as }}
- neighbor {{ neighbor.ip }} description {{ neighbor.description }}
- {% endfor %}
- !
- address-family ipv4 unicast
-  {% for network in networks %}
-  network {{ network }}
-  {% endfor %}
- exit-address-family
-!
-```
+When `FRR_ENABLED=false`, FRRService returns realistic mock data. This enables:
+- Frontend development without a VM
+- All tests to pass in CI/CD
+- Demo mode for presentations
 
 ---
 
-## 5. Ryu SDN Controller
+## 5. OVS / SDN Flow Management
 
 ### 5.1 Overview
 
-Ryu is the SDN controller that manages OpenFlow flow rules on switches.
+Open vSwitch management is split between two services:
+- **OVSService** — bridge/port management via `ovs-vsctl` (SSH)
+- **RyuService** — flow rule management via `ovs-ofctl` (SSH)
 
-### 5.2 Custom Ryu Application
+> **Note:** Despite the name "RyuService", the current implementation primarily uses SSH-based `ovs-ofctl` commands rather than a Ryu REST API. The optional SDN REST API (`sdn_rest_api.py`) can also be used when `RYU_ENABLED=true`.
 
-```
-ryu_app/
-├── __init__.py
-├── orchestration_app.py    # Main Ryu application
-├── flow_manager.py         # Flow rule management
-├── packet_handler.py       # Packet-in handling
-├── rest_api.py             # Custom REST endpoints
-└── topology_discovery.py   # LLDP-based discovery
-```
+### 5.2 OVSService Methods
 
-### 5.3 Ryu Service Interface
+| Method | Description |
+|--------|-------------|
+| `list_bridges()` | `ovs-vsctl list-br` |
+| `get_bridge(name)` | Bridge details with ports |
+| `create_bridge(name, protocols?, controller?)` | `ovs-vsctl add-br` |
+| `delete_bridge(name)` | `ovs-vsctl del-br` |
+| `add_port(bridge, port, **opts)` | `ovs-vsctl add-port` |
+| `delete_port(bridge, port)` | `ovs-vsctl del-port` |
+| `set_controller(bridge, url)` | `ovs-vsctl set-controller` |
+| `create_vxlan_port(bridge, port, remote_ip, vni)` | VXLAN tunnel port |
+| `get_status()` | Check OVS connectivity |
 
-```python
-class RyuService:
-    """Interface to Ryu SDN Controller."""
-    
-    def __init__(self, ryu_url: str = "http://localhost:8080"):
-        self.base_url = ryu_url
-        
-    async def get_switches(self) -> List[Switch]:
-        """Get all connected OpenFlow switches."""
-        
-    async def get_flows(self, dpid: str) -> List[FlowRule]:
-        """Get flow rules for a switch."""
-        
-    async def add_flow(self, dpid: str, flow: FlowRule) -> bool:
-        """Add flow rule to switch."""
-        
-    async def delete_flow(self, dpid: str, flow_id: str) -> bool:
-        """Delete flow rule from switch."""
-        
-    async def get_stats(self, dpid: str) -> SwitchStats:
-        """Get port and flow statistics."""
-```
+### 5.3 RyuService Methods (Flow Management)
 
-### 5.4 Flow Rule Schema
+| Method | Description |
+|--------|-------------|
+| `get_switches()` | List OVS bridges as "switches" |
+| `get_switch(dpid)` | Single switch details |
+| `get_flows(dpid?)` | `ovs-ofctl dump-flows` |
+| `get_flow(flow_id)` | Single flow by ID |
+| `add_flow(flow_data)` | `ovs-ofctl add-flow` |
+| `delete_flow(flow_id)` | `ovs-ofctl del-flows` |
+| `get_flow_stats(flow_id)` | Flow statistics |
+| `get_status()` | Check connectivity |
 
-```python
-class FlowRule(BaseModel):
-    dpid: str                    # Switch datapath ID
-    priority: int = 100          # Rule priority
-    match: Dict[str, Any]        # Match conditions
-    actions: List[Dict]          # Actions to perform
-    idle_timeout: int = 0        # Idle timeout
-    hard_timeout: int = 0        # Hard timeout
-    
-    # Example:
-    # match: {"in_port": 1, "eth_type": 0x0800, "ipv4_dst": "10.0.0.0/24"}
-    # actions: [{"type": "OUTPUT", "port": 2}]
+---
+
+## 6. Topology Discovery
+
+### 6.1 Discovery Process
+
+TopologyService (408 lines) performs multi-phase discovery:
+
+1. **FRR Router** — Detect FRR daemon, add as router node
+2. **OVS Bridges** — List all OVS bridges, add as switch nodes
+3. **Ports & Hosts** — For each bridge, discover ports and connected hosts
+4. **Virtual Routers** — Find network namespaces with FRR (naming convention: router*)
+5. **Virtual Hosts** — Find network namespaces (naming convention: host*)
+6. **Network Nodes** — Other namespaces
+7. **Router-to-Router Links** — Detect veth pairs between router namespaces
+8. **Physical Uplinks** — Detect physical interface connections
+
+### 6.2 Node Types
+
+| Type | Created By | Representation |
+|------|-----------|----------------|
+| `switch` | OVS bridge | Blue diamond on topology |
+| `host` | Network namespace (host*) | Green circle |
+| `router` | Network namespace + FRR (router*) | Red square |
+| `frr-router` | Main FRR daemon | Router node |
+
+### 6.3 Position Persistence
+
+Node positions are stored in-memory and can be updated via PATCH `/api/v1/topology/nodes/{node_id}`. The Topology Builder also has a dedicated PUT `/api/v1/topology/builder/positions` for batch position updates.
+
+---
+
+## 7. Topology Builder
+
+### 7.1 Overview
+
+The topology builder provides EVE-NG style functionality for creating virtual network labs on the RHEL VM. It has 11 dedicated API endpoints.
+
+### 7.2 Operations
+
+| Operation | Backend Action |
+|-----------|---------------|
+| Create switch | `ovs-vsctl add-br <name>` + set OpenFlow protocols |
+| Delete switch | `ovs-vsctl del-br <name>` |
+| Create host | `ip netns add <name>` + create veth pair + attach to bridge |
+| Delete host | `ip netns del <name>` + cleanup veth |
+| Create router | `ip netns add <name>` + start FRR daemons (zebra, bgpd, ospfd) in netns |
+| Delete router | Stop FRR daemons in netns + `ip netns del <name>` |
+| Create link | Create veth pair + attach endpoints to bridges/namespaces |
+| Delete link | Remove veth pair and port attachments |
+| Clear all | Delete all bridges, namespaces, and veth pairs |
+
+### 7.3 Interface Name Limits
+
+Linux enforces a 15-character limit on interface names. The builder truncates names accordingly and uses short prefixes (e.g., `ve-` for veth pairs).
+
+---
+
+## 8. VRF Management
+
+### 8.1 Overview
+
+Virtual Routing and Forwarding (VRF) support allows network segmentation. 5 API endpoints manage VRF lifecycle and per-VRF BGP configuration.
+
+### 8.2 Operations
+
+| Endpoint | Description |
+|----------|-------------|
+| GET `/api/v1/vrf` | List all VRFs with their route distinguishers |
+| POST `/api/v1/vrf` | Create VRF (name, RD, RT) via vtysh |
+| DELETE `/api/v1/vrf/{name}` | Delete VRF |
+| POST `/api/v1/vrf/{name}/bgp` | Configure BGP within a VRF |
+| GET `/api/v1/vrf/{name}/routes` | Get routes for a specific VRF |
+
+---
+
+## 9. Network Tools
+
+### 9.1 Overview
+
+Network diagnostic tools that execute commands from within specific network namespaces on the VM.
+
+| Tool | How it works |
+|------|-------------|
+| Ping | `ip netns exec <ns> ping -c <count> <target>` |
+| Traceroute | `ip netns exec <ns> traceroute <target>` |
+| ARP | `ip netns exec <ns> ip neigh show` |
+| List hosts | `ip netns list` |
+
+---
+
+## 10. WebSocket Endpoints
+
+### 10.1 Broadcast WebSocket (`/api/v1/ws`)
+
+Pushes JSON messages every 5 seconds containing:
+- Monitoring statistics (CPU, memory, component health)
+- Topology state
+- System events
+
+Frontend subscribes via `useWebSocket` hook which provides `lastMessage` and auto-reconnects.
+
+### 10.2 Terminal WebSocket (`/api/v1/ws/terminal`)
+
+Interactive SSH proxy to the VM. Query parameters:
+- `shell=bash` (default) — bash shell
+- `shell=vtysh` — FRR vtysh shell
+- `netns=<name>` — Execute in a specific network namespace
+
+Used by both TerminalPage (VM shell) and RouterTerminalPage (router-specific vtysh).
+
+---
+
+## 11. Testing
+
+### 11.1 Test Summary
+
+| File | Tests | Coverage |
+|------|-------|----------|
+| test_auth.py | 3 | Login success/failure, authenticated endpoint |
+| test_health.py | 3 | Root, health check, system info |
+| test_monitoring.py | 2 | Stats, events |
+| test_parsers.py | 9 | FRR route/BGP output parsing |
+| test_routing.py | 7 | Routes, BGP summary/neighbors, OSPF, static route auth |
+| test_sdn.py | 5 | Flows, switches, add/delete flow auth |
+| test_sdn_parsers.py | 13 | OVS action/flow/match parsing |
+| test_topology.py | 5 | Topology get, node/link structure, refresh auth |
+| **Total** | **47** | — |
+
+All tests use mock SSH responses via `conftest.py` fixtures.
+
+### 11.2 Running Tests
+
+```bash
+cd backend && source .venv/bin/activate
+FRR_ENABLED=false RYU_ENABLED=false OVS_ENABLED=false pytest tests/ -v
 ```
 
 ---
 
-## 6. Open vSwitch (OVS)
+## 12. Configuration
 
-### 6.1 Overview
+All settings loaded from environment variables via `pydantic-settings`. Defined in `backend/app/core/config.py`.
 
-OVS provides the data plane for packet forwarding and flow-based switching.
-
-### 6.2 OVS Service Interface
-
-```python
-class OVSService:
-    """Interface to Open vSwitch."""
-    
-    async def list_bridges(self) -> List[Bridge]:
-        """List all OVS bridges."""
-        
-    async def create_bridge(self, name: str, protocols: List[str] = None) -> bool:
-        """Create OVS bridge."""
-        
-    async def delete_bridge(self, name: str) -> bool:
-        """Delete OVS bridge."""
-        
-    async def add_port(self, bridge: str, port: str, **options) -> bool:
-        """Add port to bridge."""
-        
-    async def set_controller(self, bridge: str, controller_url: str) -> bool:
-        """Set OpenFlow controller for bridge."""
-        
-    async def create_vxlan_port(
-        self, 
-        bridge: str, 
-        port_name: str,
-        remote_ip: str,
-        vni: int
-    ) -> bool:
-        """Create VXLAN tunnel port."""
-```
-
-### 6.3 Command Mapping
-
-| Operation | OVS Command |
-|-----------|-------------|
-| Create bridge | `ovs-vsctl add-br <name>` |
-| Delete bridge | `ovs-vsctl del-br <name>` |
-| Add port | `ovs-vsctl add-port <br> <port>` |
-| Set controller | `ovs-vsctl set-controller <br> tcp:<ip>:<port>` |
-| Get flows | `ovs-ofctl dump-flows <br>` |
-| Add VXLAN | `ovs-vsctl add-port <br> <port> -- set interface <port> type=vxlan options:remote_ip=<ip> options:key=<vni>` |
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `API_HOST` | `0.0.0.0` | API listen host |
+| `API_PORT` | `8000` | API listen port |
+| `DEBUG` | `false` | Debug mode |
+| `SECRET_KEY` | `dev-secret-key-change-in-production` | JWT signing key |
+| `ACCESS_TOKEN_EXPIRE_MINUTES` | `60` | Token expiry |
+| `ADMIN_USERNAME` | `admin` | Login username |
+| `ADMIN_PASSWORD` | `admin123` | Login password |
+| `SYSTEM_MODE` | `dc` | System mode (dc/wan) |
+| `VM_HOST` | `192.168.64.3` | RHEL VM SSH host |
+| `VM_USER` | `root` | VM SSH user |
+| `VM_SSH_KEY` | `~/.ssh/id_ed25519` | SSH private key path |
+| `FRR_ENABLED` | `false` | Enable live FRR connections |
+| `FRR_VTYSH_PATH` | `/usr/bin/vtysh` | vtysh binary path on VM |
+| `RYU_ENABLED` | `false` | Enable SDN REST API |
+| `RYU_URL` | `http://192.168.64.3:8080` | SDN REST API URL |
+| `OVS_ENABLED` | `false` | Enable live OVS connections |
+| `OVS_VSCTL_PATH` | `/usr/bin/ovs-vsctl` | ovs-vsctl path on VM |
 
 ---
 
-## 7. Topology Discovery Service
+## 13. Infrastructure
 
-### 7.1 Discovery Methods
+### 13.1 Docker Compose
 
-| Method | Description | Use Case |
-|--------|-------------|----------|
-| LLDP | Link Layer Discovery Protocol | Physical topology |
-| OpenFlow | Switch/port discovery via controller | SDN topology |
-| Config-based | Manual or file-based topology | Static topology |
+Two services: `backend` + `frontend`.
 
-### 7.2 Topology Data Model
+**Backend container:**
+- Base: `python:3.11-slim`
+- Installs `openssh-client` for VM SSH
+- Mounts SSH key from host
+- Healthcheck: HTTP GET `/api/v1/health`
 
-```python
-class Node(BaseModel):
-    id: str
-    type: Literal["switch", "router", "host"]
-    name: str
-    metadata: Dict[str, Any] = {}
+**Frontend container:**
+- Build stage: `node:22-alpine` → `npm ci` + `npm run build`
+- Production: `nginx:alpine` with custom config
+- Proxies `/api/` → `http://backend:8000/api/` (with WebSocket support)
+- SPA fallback for client-side routing
 
-class Link(BaseModel):
-    id: str
-    source: str           # Source node ID
-    target: str           # Target node ID
-    source_port: str
-    target_port: str
-    bandwidth: Optional[int] = None
-    status: Literal["up", "down"] = "up"
+### 13.2 CI/CD (GitHub Actions)
 
-class Topology(BaseModel):
-    nodes: List[Node]
-    links: List[Link]
-    timestamp: datetime
-```
+Triggers on push/PR to `main`. Three jobs:
 
----
+| Job | Steps |
+|-----|-------|
+| Backend Tests | Python 3.11, pip install, `pytest tests/ -v --tb=short` (mock mode) |
+| Frontend Build | Node 22, `npm ci`, `npx tsc --noEmit`, `npm run build` |
+| Docker Build | Build both Docker images (after tests pass) |
 
-## 8. State Management
+### 13.3 Scripts
 
-### 8.1 State Store
-
-```python
-class StateManager:
-    """Manages system configuration and runtime state."""
-    
-    def __init__(self, state_file: str = "state.json"):
-        self.state_file = state_file
-        self._state: Dict = {}
-        
-    async def load(self) -> None:
-        """Load state from file."""
-        
-    async def save(self) -> None:
-        """Persist state to file."""
-        
-    async def get(self, key: str, default: Any = None) -> Any:
-        """Get state value."""
-        
-    async def set(self, key: str, value: Any) -> None:
-        """Set state value."""
-```
-
-### 8.2 State Schema
-
-```json
-{
-  "version": "1.0.0",
-  "mode": "dc",
-  "routing": {
-    "frr_config_path": "/etc/frr/frr.conf",
-    "bgp": {
-      "asn": 65001,
-      "router_id": "10.0.0.1"
-    }
-  },
-  "sdn": {
-    "controller_ip": "127.0.0.1",
-    "controller_port": 6633
-  },
-  "switches": [
-    {
-      "name": "br0",
-      "dpid": "0000000000000001",
-      "ports": ["eth0", "eth1"]
-    }
-  ],
-  "topology": {
-    "nodes": [...],
-    "links": [...]
-  }
-}
-```
-
----
-
-## 9. Error Handling
-
-### 9.1 Error Categories
-
-| Category | HTTP Code | Description |
-|----------|-----------|-------------|
-| Validation Error | 400 | Invalid input data |
-| Authentication Error | 401 | Missing/invalid token |
-| Authorization Error | 403 | Insufficient permissions |
-| Not Found | 404 | Resource not found |
-| Conflict | 409 | Resource conflict |
-| Service Error | 500 | Internal service failure |
-| External Service Error | 502 | FRR/Ryu/OVS failure |
-
-### 9.2 Error Response Schema
-
-```python
-class ErrorResponse(BaseModel):
-    error: str                    # Error code
-    message: str                  # Human-readable message
-    details: Optional[Dict] = None  # Additional details
-    timestamp: datetime
-```
-
----
-
-## 10. Logging & Monitoring
-
-### 10.1 Log Format
-
-```
-{timestamp} [{level}] {component}: {message} {context}
-```
-
-Example:
-```
-2026-02-15T10:30:00Z [INFO] orchestrator: BGP neighbor added {"neighbor": "10.0.0.2", "asn": 65002}
-```
-
-### 10.2 Metrics
-
-| Metric | Type | Description |
-|--------|------|-------------|
-| `api_requests_total` | Counter | Total API requests |
-| `api_request_duration` | Histogram | Request latency |
-| `frr_bgp_neighbors` | Gauge | Number of BGP neighbors |
-| `ovs_flows_total` | Gauge | Total flow rules |
-| `topology_links_up` | Gauge | Active link count |
+| Script | Purpose |
+|--------|---------|
+| `scripts/setup-redhat-vm.sh` | Initial RHEL VM setup (FRR, OVS) |
+| `scripts/setup-vm-full.sh` | Full VM setup with scenarios |
+| `scripts/setup-vm-scenarios.sh` | Create test network scenarios |
+| `scripts/fix-ovs.sh` | OVS troubleshooting/fix script |
+| `scripts/netorch_controller.py` | NetOrch SDN controller |
+| `scripts/osken-launcher.py` | OS-Ken SDN controller launcher |
+| `scripts/sdn_rest_api.py` | Standalone SDN REST API bridge |

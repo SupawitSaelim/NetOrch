@@ -2,13 +2,15 @@
 
 ## 1. Overview
 
-This document defines the RESTful API for the Hybrid SDN Orchestration Platform.
+This document defines all API endpoints for the NetOrch platform.
 
 **Base URL:** `http://localhost:8000/api/v1`
 
 **Content-Type:** `application/json`
 
-**Authentication:** Bearer token (JWT)
+**Authentication:** Bearer token (JWT) — required for write operations (POST/PUT/DELETE on protected endpoints). Read operations are public.
+
+**Total Endpoints:** 45 REST + 2 WebSocket
 
 ---
 
@@ -24,7 +26,7 @@ POST /auth/login
 ```json
 {
   "username": "admin",
-  "password": "password123"
+  "password": "admin123"
 }
 ```
 
@@ -46,7 +48,7 @@ Authorization: Bearer <access_token>
 
 ---
 
-## 3. System Endpoints
+## 3. Health & System
 
 ### 3.1 Health Check
 
@@ -84,23 +86,28 @@ GET /system/info
 }
 ```
 
-### 3.3 Get/Set Mode
+### 3.3 Get System Mode
 
 ```http
 GET /system/mode
+```
+
+### 3.4 Set System Mode (Auth Required)
+
+```http
 PUT /system/mode
 ```
 
-**PUT Request Body:**
+**Request Body:**
 ```json
 {
-  "mode": "dc"  // or "wan"
+  "mode": "dc"
 }
 ```
 
 ---
 
-## 4. Routing Endpoints
+## 4. Routing Endpoints (10)
 
 ### 4.1 Get Routing Table
 
@@ -135,7 +142,7 @@ GET /routing/routes?destination=10.0.0.0/24
 }
 ```
 
-### 4.2 Add Static Route
+### 4.2 Add Static Route (Auth Required)
 
 ```http
 POST /routing/routes/static
@@ -146,42 +153,17 @@ POST /routing/routes/static
 {
   "destination": "10.0.0.0/24",
   "next_hop": "192.168.1.1",
-  "metric": 100,
-  "description": "Route to network A"
+  "metric": 100
 }
 ```
 
-**Response (201):**
-```json
-{
-  "success": true,
-  "route": {
-    "destination": "10.0.0.0/24",
-    "next_hop": "192.168.1.1",
-    "protocol": "static"
-  }
-}
-```
-
-### 4.3 Delete Static Route
+### 4.3 Delete Static Route (Auth Required)
 
 ```http
 DELETE /routing/routes/static/{destination}
 ```
 
-**Response (200):**
-```json
-{
-  "success": true,
-  "message": "Route deleted"
-}
-```
-
----
-
-## 5. BGP Endpoints
-
-### 5.1 Get BGP Summary
+### 4.4 Get BGP Summary
 
 ```http
 GET /routing/bgp/summary
@@ -207,36 +189,14 @@ GET /routing/bgp/summary
 }
 ```
 
-### 5.2 Get BGP Neighbors
+### 4.5 Get BGP Neighbors
 
 ```http
 GET /routing/bgp/neighbors
 GET /routing/bgp/neighbors/{neighbor_ip}
 ```
 
-**Response (200):**
-```json
-{
-  "neighbors": [
-    {
-      "neighbor": "10.0.0.2",
-      "remote_as": 65002,
-      "description": "Peer to Site B",
-      "state": "Established",
-      "uptime": "1d02h30m",
-      "local_address": "10.0.0.1",
-      "local_port": 179,
-      "remote_port": 45678,
-      "hold_time": 180,
-      "keepalive": 60,
-      "prefixes_received": 10,
-      "prefixes_sent": 5
-    }
-  ]
-}
-```
-
-### 5.3 Add BGP Neighbor
+### 4.6 Add BGP Neighbor (Auth Required)
 
 ```http
 POST /routing/bgp/neighbors
@@ -255,101 +215,29 @@ POST /routing/bgp/neighbors
 }
 ```
 
-**Response (201):**
-```json
-{
-  "success": true,
-  "neighbor": {
-    "neighbor": "10.0.0.3",
-    "remote_as": 65003,
-    "state": "Idle"
-  }
-}
-```
-
-### 5.4 Delete BGP Neighbor
+### 4.7 Delete BGP Neighbor (Auth Required)
 
 ```http
 DELETE /routing/bgp/neighbors/{neighbor_ip}
 ```
 
-### 5.5 Get BGP Routes
-
-```http
-GET /routing/bgp/routes
-GET /routing/bgp/routes?neighbor={neighbor_ip}&direction={in|out}
-```
-
----
-
-## 6. OSPF Endpoints
-
-### 6.1 Get OSPF Summary
+### 4.8 Get OSPF Summary
 
 ```http
 GET /routing/ospf/summary
 ```
 
-**Response (200):**
-```json
-{
-  "router_id": "10.0.0.1",
-  "areas": [
-    {
-      "area_id": "0.0.0.0",
-      "type": "normal",
-      "interfaces": 2,
-      "neighbors": 1
-    }
-  ],
-  "total_routes": 15
-}
-```
-
-### 6.2 Get OSPF Neighbors
+### 4.9 Get OSPF Neighbors
 
 ```http
 GET /routing/ospf/neighbors
 ```
 
-**Response (200):**
-```json
-{
-  "neighbors": [
-    {
-      "neighbor_id": "10.0.0.2",
-      "priority": 1,
-      "state": "Full/DR",
-      "address": "192.168.1.2",
-      "interface": "eth0",
-      "dead_time": "00:00:35"
-    }
-  ]
-}
-```
-
-### 6.3 Configure OSPF Interface
-
-```http
-POST /routing/ospf/interfaces
-```
-
-**Request Body:**
-```json
-{
-  "interface": "eth1",
-  "area": "0.0.0.0",
-  "cost": 10,
-  "priority": 1,
-  "network_type": "point-to-point"
-}
-```
-
 ---
 
-## 7. SDN Flow Endpoints
+## 5. SDN / Flow Endpoints (11)
 
-### 7.1 Get All Flows
+### 5.1 Get All Flows
 
 ```http
 GET /sdn/flows
@@ -383,13 +271,13 @@ GET /sdn/flows?dpid={switch_dpid}
 }
 ```
 
-### 7.2 Get Flow by ID
+### 5.2 Get Flow by ID
 
 ```http
 GET /sdn/flows/{flow_id}
 ```
 
-### 7.3 Add Flow
+### 5.3 Add Flow (Auth Required)
 
 ```http
 POST /sdn/flows
@@ -416,43 +304,19 @@ POST /sdn/flows
 }
 ```
 
-**Response (201):**
-```json
-{
-  "success": true,
-  "flow_id": "flow-002"
-}
-```
-
-### 7.4 Delete Flow
+### 5.4 Delete Flow (Auth Required)
 
 ```http
 DELETE /sdn/flows/{flow_id}
-DELETE /sdn/flows?dpid={dpid}&match={match_criteria}
 ```
 
-### 7.5 Get Flow Statistics
+### 5.5 Get Flow Statistics
 
 ```http
 GET /sdn/flows/{flow_id}/stats
 ```
 
-**Response (200):**
-```json
-{
-  "flow_id": "flow-001",
-  "packet_count": 1500,
-  "byte_count": 153600,
-  "duration_sec": 3600,
-  "duration_nsec": 123456789
-}
-```
-
----
-
-## 8. Switch Management Endpoints
-
-### 8.1 Get All Switches
+### 5.6 Get All Switches
 
 ```http
 GET /switches
@@ -473,12 +337,6 @@ GET /switches
           "name": "eth0",
           "hw_addr": "aa:bb:cc:dd:ee:01",
           "state": "up"
-        },
-        {
-          "port_no": 2,
-          "name": "eth1",
-          "hw_addr": "aa:bb:cc:dd:ee:02",
-          "state": "up"
         }
       ]
     }
@@ -486,13 +344,13 @@ GET /switches
 }
 ```
 
-### 8.2 Get Switch Details
+### 5.7 Get Switch Details
 
 ```http
 GET /switches/{dpid}
 ```
 
-### 8.3 Create Bridge
+### 5.8 Create Bridge (Auth Required)
 
 ```http
 POST /switches
@@ -503,18 +361,17 @@ POST /switches
 {
   "name": "br1",
   "protocols": ["OpenFlow13", "OpenFlow14"],
-  "controller": "tcp:127.0.0.1:6633",
-  "datapath_type": "system"
+  "controller": "tcp:127.0.0.1:6633"
 }
 ```
 
-### 8.4 Delete Bridge
+### 5.9 Delete Bridge (Auth Required)
 
 ```http
 DELETE /switches/{name}
 ```
 
-### 8.5 Add Port to Bridge
+### 5.10 Add Port (Auth Required)
 
 ```http
 POST /switches/{bridge_name}/ports
@@ -530,7 +387,7 @@ POST /switches/{bridge_name}/ports
 }
 ```
 
-### 8.6 Create VXLAN Port
+### 5.11 Create VXLAN Port (Auth Required)
 
 ```http
 POST /switches/{bridge_name}/ports/vxlan
@@ -548,9 +405,9 @@ POST /switches/{bridge_name}/ports/vxlan
 
 ---
 
-## 9. Topology Endpoints
+## 6. Topology Endpoints (3)
 
-### 9.1 Get Topology
+### 6.1 Get Topology
 
 ```http
 GET /topology
@@ -561,30 +418,31 @@ GET /topology
 {
   "nodes": [
     {
-      "id": "switch-001",
+      "id": "switch-br0",
       "type": "switch",
       "name": "br0",
-      "dpid": "0000000000000001",
-      "metadata": {
-        "x": 100,
-        "y": 200
-      }
+      "metadata": { "x": 100, "y": 200 }
     },
     {
-      "id": "router-001",
+      "id": "host-host1",
+      "type": "host",
+      "name": "host1",
+      "metadata": {}
+    },
+    {
+      "id": "router-router1",
       "type": "router",
-      "name": "frr-router",
+      "name": "router1",
       "metadata": {}
     }
   ],
   "links": [
     {
       "id": "link-001",
-      "source": "switch-001",
-      "target": "router-001",
-      "source_port": "eth0",
-      "target_port": "eth1",
-      "bandwidth": 1000,
+      "source": "switch-br0",
+      "target": "host-host1",
+      "source_port": "ve-host1-br",
+      "target_port": "ve-host1",
       "status": "up"
     }
   ],
@@ -592,13 +450,13 @@ GET /topology
 }
 ```
 
-### 9.2 Refresh Topology
+### 6.2 Refresh Topology (Auth Required)
 
 ```http
 POST /topology/refresh
 ```
 
-### 9.3 Update Node Position
+### 6.3 Update Node Position (Auth Required)
 
 ```http
 PATCH /topology/nodes/{node_id}
@@ -607,18 +465,132 @@ PATCH /topology/nodes/{node_id}
 **Request Body:**
 ```json
 {
-  "metadata": {
-    "x": 150,
-    "y": 250
-  }
+  "metadata": { "x": 150, "y": 250 }
 }
 ```
 
 ---
 
-## 10. Monitoring Endpoints
+## 7. Topology Builder Endpoints (11)
 
-### 10.1 Get System Stats
+These endpoints create/delete actual network resources on the RHEL VM.
+
+### 7.1 Create Switch
+
+```http
+POST /topology/builder/switches
+```
+
+**Request Body:**
+```json
+{
+  "name": "switch1"
+}
+```
+
+### 7.2 Delete Switch
+
+```http
+DELETE /topology/builder/switches/{name}
+```
+
+### 7.3 Create Host
+
+```http
+POST /topology/builder/hosts
+```
+
+**Request Body:**
+```json
+{
+  "name": "host1",
+  "switch": "switch1",
+  "ip": "10.0.0.1/24"
+}
+```
+
+### 7.4 Delete Host
+
+```http
+DELETE /topology/builder/hosts/{name}
+```
+
+### 7.5 Create Router
+
+```http
+POST /topology/builder/routers
+```
+
+**Request Body:**
+```json
+{
+  "name": "router1"
+}
+```
+
+Creates a network namespace with FRR daemons (zebra, bgpd, ospfd).
+
+### 7.6 Delete Router
+
+```http
+DELETE /topology/builder/routers/{name}
+```
+
+### 7.7 Create Link
+
+```http
+POST /topology/builder/links
+```
+
+**Request Body:**
+```json
+{
+  "source_name": "host1",
+  "target_name": "switch1"
+}
+```
+
+### 7.8 Delete Link
+
+```http
+DELETE /topology/builder/links?source_name=host1&target_name=switch1
+```
+
+### 7.9 Batch Update Positions
+
+```http
+PUT /topology/builder/positions
+```
+
+**Request Body:**
+```json
+{
+  "positions": {
+    "switch-switch1": { "x": 100, "y": 200 },
+    "host-host1": { "x": 300, "y": 400 }
+  }
+}
+```
+
+### 7.10 List Hosts (Network Namespaces)
+
+```http
+GET /topology/builder/hosts
+```
+
+### 7.11 Clear All Topology
+
+```http
+DELETE /topology/builder/all
+```
+
+Removes all OVS bridges, network namespaces, and veth pairs on the VM.
+
+---
+
+## 8. Monitoring Endpoints (3)
+
+### 8.1 Get System Stats
 
 ```http
 GET /monitoring/stats
@@ -632,51 +604,20 @@ GET /monitoring/stats
   "uptime": 86400,
   "api_requests_total": 10000,
   "components": {
-    "frr": {
-      "bgp_neighbors": 2,
-      "ospf_neighbors": 1,
-      "total_routes": 50
-    },
-    "ovs": {
-      "bridges": 2,
-      "flows": 150
-    },
-    "ryu": {
-      "switches": 2,
-      "controllers": 1
-    }
+    "frr": { "bgp_neighbors": 2, "ospf_neighbors": 1, "total_routes": 50 },
+    "ovs": { "bridges": 2, "flows": 150 },
+    "ryu": { "switches": 2, "controllers": 1 }
   }
 }
 ```
 
-### 10.2 Get Port Statistics
+### 8.2 Get Port Statistics
 
 ```http
 GET /monitoring/ports/{dpid}
-GET /monitoring/ports/{dpid}/{port_no}
 ```
 
-**Response (200):**
-```json
-{
-  "ports": [
-    {
-      "port_no": 1,
-      "name": "eth0",
-      "rx_packets": 100000,
-      "tx_packets": 95000,
-      "rx_bytes": 10240000,
-      "tx_bytes": 9728000,
-      "rx_dropped": 0,
-      "tx_dropped": 0,
-      "rx_errors": 0,
-      "tx_errors": 0
-    }
-  ]
-}
-```
-
-### 10.3 Get Events/Logs
+### 8.3 Get Events/Logs
 
 ```http
 GET /monitoring/events
@@ -701,123 +642,229 @@ GET /monitoring/events?level=error&limit=100
 
 ---
 
-## 11. Policy Endpoints
+## 9. VRF Endpoints (5)
 
-### 11.1 Get Policies
-
-```http
-GET /policies
-```
-
-**Response (200):**
-```json
-{
-  "policies": [
-    {
-      "id": "policy-001",
-      "name": "Block-External-SSH",
-      "enabled": true,
-      "priority": 1000,
-      "match": {
-        "ipv4_src": "0.0.0.0/0",
-        "tcp_dst": 22
-      },
-      "action": "drop",
-      "created_at": "2026-02-15T09:00:00Z"
-    }
-  ]
-}
-```
-
-### 11.2 Create Policy
+### 9.1 List VRFs
 
 ```http
-POST /policies
+GET /vrf
+```
+
+### 9.2 Create VRF (Auth Required)
+
+```http
+POST /vrf
 ```
 
 **Request Body:**
 ```json
 {
-  "name": "Redirect-HTTP-Traffic",
-  "priority": 500,
-  "match": {
-    "eth_type": 2048,
-    "ip_proto": 6,
-    "tcp_dst": 80
-  },
-  "action": "redirect",
-  "action_params": {
-    "output_port": 5
-  }
+  "name": "customer-a",
+  "rd": "65001:100",
+  "rt_import": "65001:100",
+  "rt_export": "65001:100"
 }
 ```
 
-### 11.3 Update Policy
+### 9.3 Delete VRF (Auth Required)
 
 ```http
-PUT /policies/{policy_id}
+DELETE /vrf/{name}
 ```
 
-### 11.4 Delete Policy
+### 9.4 Configure BGP in VRF (Auth Required)
 
 ```http
-DELETE /policies/{policy_id}
+POST /vrf/{name}/bgp
 ```
 
-### 11.5 Enable/Disable Policy
+### 9.5 Get VRF Routes
 
 ```http
-POST /policies/{policy_id}/enable
-POST /policies/{policy_id}/disable
+GET /vrf/{name}/routes
 ```
 
 ---
 
-## 12. Error Responses
+## 10. Network Tools Endpoints (4)
 
-### 12.1 Error Format
+### 10.1 Ping
+
+```http
+POST /tools/ping
+```
+
+**Request Body:**
+```json
+{
+  "source": "host1",
+  "target": "10.0.0.2",
+  "count": 4
+}
+```
+
+### 10.2 Traceroute
+
+```http
+POST /tools/traceroute
+```
+
+**Request Body:**
+```json
+{
+  "source": "host1",
+  "target": "10.0.0.2"
+}
+```
+
+### 10.3 ARP Table
+
+```http
+POST /tools/arp
+```
+
+**Request Body:**
+```json
+{
+  "source": "host1"
+}
+```
+
+### 10.4 List Hosts
+
+```http
+GET /tools/hosts
+```
+
+Returns all network namespaces available for tool execution.
+
+---
+
+## 11. WebSocket Endpoints (2)
+
+### 11.1 Real-Time Broadcast
+
+```
+ws://host/api/v1/ws
+```
+
+Server pushes JSON messages every 5 seconds:
+```json
+{
+  "type": "stats",
+  "data": { "cpu_usage": 25.5, "memory_usage": 45.2, "..." : "..." }
+}
+```
+
+Message types: `stats`, `topology`, `events`
+
+### 11.2 Interactive Terminal
+
+```
+ws://host/api/v1/ws/terminal?shell=bash
+ws://host/api/v1/ws/terminal?shell=vtysh&netns=router1
+```
+
+**Query Parameters:**
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| shell | `bash` | Shell type: `bash` or `vtysh` |
+| netns | — | Network namespace to execute in |
+
+Bidirectional: client sends keystrokes, server sends terminal output.
+
+---
+
+## 12. Endpoint Summary Table
+
+| Category | Method | Path | Auth | Count |
+|----------|--------|------|------|-------|
+| **Health** | GET | `/health` | — | |
+| | GET | `/system/info` | — | **2** |
+| **Auth** | POST | `/auth/login` | — | **1** |
+| **System** | GET | `/system/mode` | — | |
+| | PUT | `/system/mode` | ✅ | **2** |
+| **Routing** | GET | `/routing/routes` | — | |
+| | POST | `/routing/routes/static` | ✅ | |
+| | DELETE | `/routing/routes/static/{dest}` | ✅ | |
+| | GET | `/routing/bgp/summary` | — | |
+| | GET | `/routing/bgp/neighbors` | — | |
+| | GET | `/routing/bgp/neighbors/{ip}` | — | |
+| | POST | `/routing/bgp/neighbors` | ✅ | |
+| | DELETE | `/routing/bgp/neighbors/{ip}` | ✅ | |
+| | GET | `/routing/ospf/summary` | — | |
+| | GET | `/routing/ospf/neighbors` | — | **10** |
+| **SDN** | GET | `/sdn/flows` | — | |
+| | GET | `/sdn/flows/{id}` | — | |
+| | POST | `/sdn/flows` | ✅ | |
+| | DELETE | `/sdn/flows/{id}` | ✅ | |
+| | GET | `/sdn/flows/{id}/stats` | — | |
+| | GET | `/switches` | — | |
+| | GET | `/switches/{dpid}` | — | |
+| | POST | `/switches` | ✅ | |
+| | DELETE | `/switches/{name}` | ✅ | |
+| | POST | `/switches/{name}/ports` | ✅ | |
+| | POST | `/switches/{name}/ports/vxlan` | ✅ | **11** |
+| **Topology** | GET | `/topology` | — | |
+| | POST | `/topology/refresh` | ✅ | |
+| | PATCH | `/topology/nodes/{id}` | ✅ | **3** |
+| **Builder** | POST | `/topology/builder/switches` | — | |
+| | DELETE | `/topology/builder/switches/{name}` | — | |
+| | POST | `/topology/builder/hosts` | — | |
+| | DELETE | `/topology/builder/hosts/{name}` | — | |
+| | POST | `/topology/builder/routers` | — | |
+| | DELETE | `/topology/builder/routers/{name}` | — | |
+| | POST | `/topology/builder/links` | — | |
+| | DELETE | `/topology/builder/links` | — | |
+| | PUT | `/topology/builder/positions` | — | |
+| | GET | `/topology/builder/hosts` | — | |
+| | DELETE | `/topology/builder/all` | — | **11** |
+| **Monitoring** | GET | `/monitoring/stats` | — | |
+| | GET | `/monitoring/ports/{dpid}` | — | |
+| | GET | `/monitoring/events` | — | **3** |
+| **VRF** | GET | `/vrf` | — | |
+| | POST | `/vrf` | ✅ | |
+| | DELETE | `/vrf/{name}` | ✅ | |
+| | POST | `/vrf/{name}/bgp` | ✅ | |
+| | GET | `/vrf/{name}/routes` | — | **5** |
+| **Tools** | POST | `/tools/ping` | — | |
+| | POST | `/tools/traceroute` | — | |
+| | POST | `/tools/arp` | — | |
+| | GET | `/tools/hosts` | — | **4** |
+| **WebSocket** | WS | `/ws` | — | |
+| | WS | `/ws/terminal` | — | **2** |
+| | | | **Total** | **45 REST + 2 WS** |
+
+---
+
+## 13. Error Responses
+
+### Error Format
 
 ```json
 {
-  "error": "VALIDATION_ERROR",
-  "message": "Invalid IP address format",
-  "details": {
-    "field": "neighbor",
-    "value": "invalid-ip"
-  },
-  "timestamp": "2026-02-15T10:00:00Z"
+  "detail": "Error message here"
 }
 ```
 
-### 12.2 Error Codes
+### HTTP Status Codes
 
-| Code | HTTP Status | Description |
-|------|-------------|-------------|
-| `VALIDATION_ERROR` | 400 | Invalid input data |
-| `UNAUTHORIZED` | 401 | Missing or invalid token |
-| `FORBIDDEN` | 403 | Insufficient permissions |
-| `NOT_FOUND` | 404 | Resource not found |
-| `CONFLICT` | 409 | Resource already exists |
-| `INTERNAL_ERROR` | 500 | Internal server error |
-| `SERVICE_UNAVAILABLE` | 503 | FRR/Ryu/OVS not available |
+| Code | Description |
+|------|-------------|
+| 200 | Success |
+| 201 | Created |
+| 400 | Bad Request / Validation Error |
+| 401 | Unauthorized (missing/invalid token) |
+| 403 | Forbidden |
+| 404 | Not Found |
+| 500 | Internal Server Error |
+| 503 | Service Unavailable (FRR/OVS not reachable) |
 
 ---
 
-## 13. API Versioning
+## 14. Interactive API Docs
 
-The API is versioned via URL path (`/api/v1/`). Breaking changes will increment the version number.
+FastAPI auto-generates interactive documentation:
 
-## 14. Rate Limiting
-
-| Tier | Requests/minute |
-|------|-----------------|
-| Default | 100 |
-| Authenticated | 500 |
-| Admin | Unlimited |
-
-Rate limit headers:
-```
-X-RateLimit-Limit: 100
-X-RateLimit-Remaining: 95
-X-RateLimit-Reset: 1708000000
-```
+- **Swagger UI:** `http://localhost:8000/docs`
+- **ReDoc:** `http://localhost:8000/redoc`
