@@ -251,6 +251,31 @@ class RyuService:
     # SSH-based OVS operations (primary path)
     # ======================================================================
 
+    # Cache bridge→OpenFlow protocol to avoid repeated lookups
+    _bridge_proto: dict[str, str] = {}
+
+    async def _ofctl(self, subcmd: str, bridge: str, args: str = "") -> 'CmdResult':
+        """Run ovs-ofctl with the correct OpenFlow version for the bridge."""
+        proto = await self._get_bridge_proto(bridge)
+        of_flag = f"-O {proto}" if proto else ""
+        cmd = f"ovs-ofctl {of_flag} {subcmd} {bridge} {args}".strip()
+        return await ssh_exec(cmd)
+
+    async def _get_bridge_proto(self, bridge: str) -> str:
+        """Detect the OpenFlow protocol version configured on a bridge."""
+        if bridge in self._bridge_proto:
+            return self._bridge_proto[bridge]
+        r = await ssh_exec(f"ovs-vsctl get bridge {bridge} protocols 2>/dev/null")
+        proto = "OpenFlow13"  # safe default
+        if r.returncode == 0 and r.stdout.strip():
+            raw = r.stdout.strip().strip('[]').strip('"')
+            # e.g. ["OpenFlow13"] or OpenFlow13
+            if raw:
+                # Take highest version
+                proto = raw.split(',')[-1].strip().strip('"')
+        self._bridge_proto[bridge] = proto
+        return proto
+
     async def _ssh_list_bridges(self) -> list[str]:
         """List all OVS bridges on the VM."""
         r = await ssh_exec("ovs-vsctl list-br")
@@ -260,8 +285,8 @@ class RyuService:
 
     async def _ssh_get_switch(self, bridge: str) -> dict:
         """Get switch info for one bridge via SSH."""
-        # Get ports + DPID
-        show_r = await ssh_exec(f"ovs-ofctl show {bridge}")
+        # Get ports + DPID (with correct OF version)
+        show_r = await self._ofctl("show", bridge)
         _hex_dpid, ports = _parse_ofctl_show(show_r.stdout) if show_r.returncode == 0 else ("", [])
 
         # Get controller
@@ -287,9 +312,10 @@ class RyuService:
                 raw_list = data if isinstance(data, list) else data.get("switches", [])
                 switches = []
                 for sw in raw_list:
+                    name = sw.get("name", "")
                     switches.append({
-                        "dpid": sw.get("dpid", sw.get("name", "")),
-                        "name": sw.get("name", ""),
+                        "dpid": name,  # Always use bridge name as dpid
+                        "name": name,
                         "connected": sw.get("connected", True),
                         "controller": sw.get("controller", ""),
                         "ports": [
@@ -343,7 +369,7 @@ class RyuService:
         # SSH fallback
         try:
             if dpid:
-                r = await ssh_exec(f"ovs-ofctl dump-flows {dpid}")
+                r = await self._ofctl("dump-flows", dpid)
                 if r.returncode != 0:
                     logger.error("ovs-ofctl dump-flows %s failed: %s", dpid, r.stderr)
                     return []
@@ -352,7 +378,7 @@ class RyuService:
                 bridges = await self._ssh_list_bridges()
                 all_flows_ssh: list[dict] = []
                 for br in bridges:
-                    r = await ssh_exec(f"ovs-ofctl dump-flows {br}")
+                    r = await self._ofctl("dump-flows", br)
                     if r.returncode == 0:
                         all_flows_ssh.extend(_parse_dump_flows(r.stdout, br))
                 return all_flows_ssh
@@ -391,7 +417,7 @@ class RyuService:
                 flow_spec += f",{match_str}"
             flow_spec += f",actions={actions_str}"
 
-            r = await ssh_exec(f'ovs-ofctl add-flow {bridge} "{flow_spec}"')
+            r = await self._ofctl("add-flow", bridge, f'"{flow_spec}"')
             if r.returncode != 0:
                 logger.error("ovs-ofctl add-flow failed: %s", r.stderr)
                 raise RuntimeError(r.stderr)
@@ -426,7 +452,7 @@ class RyuService:
             if match_str:
                 flow_spec += f",{match_str}"
 
-            r = await ssh_exec(f'ovs-ofctl del-flows --strict {bridge} "{flow_spec}"')
+            r = await self._ofctl("del-flows --strict", bridge, f'"{flow_spec}"')
             if r.returncode != 0:
                 logger.error("ovs-ofctl del-flows failed: %s", r.stderr)
                 return False

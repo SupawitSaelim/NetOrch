@@ -44,15 +44,17 @@ async def _mock_ssh_exec(command: str, timeout: int = 15) -> CmdResult:
     cmd = command.strip()
     if cmd == "ovs-vsctl list-br":
         return CmdResult(_MOCK_LIST_BR.strip(), "", 0)
-    if cmd.startswith("ovs-ofctl show"):
+    if "ovs-vsctl get bridge" in cmd and "protocols" in cmd:
+        return CmdResult('[\"OpenFlow13\"]', "", 0)
+    if "ovs-ofctl" in cmd and "show" in cmd:
         return CmdResult(_MOCK_OFCTL_SHOW.strip(), "", 0)
-    if cmd.startswith("ovs-ofctl dump-flows"):
+    if "ovs-ofctl" in cmd and "dump-flows" in cmd:
         return CmdResult(_MOCK_DUMP_FLOWS.strip(), "", 0)
-    if cmd.startswith("ovs-vsctl get-controller"):
+    if "ovs-vsctl get-controller" in cmd:
         return CmdResult(_MOCK_GET_CTRL.strip(), "", 0)
-    if cmd.startswith("ovs-ofctl add-flow"):
+    if "ovs-ofctl" in cmd and "add-flow" in cmd:
         return CmdResult("", "", 0)
-    if cmd.startswith("ovs-ofctl del-flows"):
+    if "ovs-ofctl" in cmd and "del-flows" in cmd:
         return CmdResult("", "", 0)
     if cmd.startswith("ovs-vsctl show"):
         return CmdResult("b2dc6bcf", "", 0)
