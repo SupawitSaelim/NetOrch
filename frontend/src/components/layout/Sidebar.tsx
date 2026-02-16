@@ -25,6 +25,7 @@ const navItems: NavItem[] = [
   { path: '/flows', label: 'SDN Flows', icon: '📡' },
   { path: '/monitoring', label: 'Monitoring', icon: '📈' },
   { path: '/terminal', label: 'Terminal', icon: '💻' },
+  { path: '/tools', label: 'Net Tools', icon: '🏓' },
   { path: '/labs', label: 'Labs', icon: '🧪' },
   { path: '/learn', label: 'Learn', icon: '📚' },
 ];

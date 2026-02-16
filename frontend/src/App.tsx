@@ -13,6 +13,7 @@ const RoutersPage = lazy(() => import('./features/routers/RoutersPage'));
 const LearnPage = lazy(() => import('./features/learn/LearnPage'));
 const LabsPage = lazy(() => import('./features/labs/LabsPage'));
 const LabDetailPage = lazy(() => import('./features/labs/LabDetailPage'));
+const NetworkToolsPage = lazy(() => import('./features/tools/NetworkToolsPage'));
 
 function Loading() {
   return (
@@ -111,6 +112,14 @@ export default function App() {
           element={
             <Suspense fallback={<Loading />}>
               <LabDetailPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="tools"
+          element={
+            <Suspense fallback={<Loading />}>
+              <NetworkToolsPage />
             </Suspense>
           }
         />

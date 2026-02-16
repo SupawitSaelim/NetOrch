@@ -4,6 +4,7 @@ from fastapi import APIRouter
 
 from app.api.v1.auth import router as auth_router
 from app.api.v1.monitoring import router as monitoring_router
+from app.api.v1.network_tools import router as network_tools_router
 from app.api.v1.routing import router as routing_router
 from app.api.v1.sdn import router as sdn_router
 from app.api.v1.system import router as system_router
@@ -21,3 +22,4 @@ router.include_router(topology_router)
 router.include_router(topology_builder_router)
 router.include_router(monitoring_router)
 router.include_router(vrf_router)
+router.include_router(network_tools_router)

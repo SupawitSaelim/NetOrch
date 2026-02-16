@@ -137,3 +137,25 @@ export const deleteLink = (sourceName: string, targetName: string) =>
 
 export const saveTopologyPositions = (positions: Record<string, { x: number; y: number }>) =>
   client.put<{ success: boolean; updated: number }>('/topology/builder/positions', { positions });
+
+// --- Network Tools ---
+export const toolPing = (data: { source: string; target: string; count?: number; timeout?: number }) =>
+  client.post<{
+    success: boolean; source: string; target: string; output: string; error: string | null;
+    summary: { transmitted?: number; received?: number; loss_pct?: number; rtt_min?: number; rtt_avg?: number; rtt_max?: number };
+  }>('/tools/ping', data);
+
+export const toolTraceroute = (data: { source: string; target: string; max_hops?: number; timeout?: number }) =>
+  client.post<{
+    success: boolean; source: string; target: string; output: string; error: string | null;
+    hops: { hop: number; detail: string }[];
+  }>('/tools/traceroute', data);
+
+export const toolArp = (data: { source: string }) =>
+  client.post<{
+    success: boolean; source: string; output: string;
+    entries: { ip: string; mac?: string; state: string; interface: string }[];
+  }>('/tools/arp', data);
+
+export const toolListHosts = () =>
+  client.get<{ hosts: string[] }>('/tools/hosts');
