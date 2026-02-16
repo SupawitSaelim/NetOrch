@@ -381,14 +381,14 @@ class TopologyService:
                 cloud_id = f"cloud-{cloud_name}"
                 _add_node(cloud_id, "cloud", cloud_name)
 
-            # ---- 8) Router-to-cloud links (macvlan wan-* interfaces) ----
+            # ---- 8) Router-to-cloud links (wan-* veth interfaces) ----
             for rname in vrouter_names:
                 vrouter_id = f"vrouter-{rname}"
-                mv_r = await ssh_exec(
-                    f"ip netns exec {rname} ip -o link show type macvlan 2>/dev/null"
+                iface_r = await ssh_exec(
+                    f"ip netns exec {rname} ip -o link show 2>/dev/null"
                 )
-                if mv_r.returncode == 0 and mv_r.stdout.strip():
-                    for mline in mv_r.stdout.splitlines():
+                if iface_r.returncode == 0 and iface_r.stdout.strip():
+                    for mline in iface_r.stdout.splitlines():
                         if "wan-" not in mline:
                             continue
                         parts = mline.split(":")

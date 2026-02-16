@@ -99,16 +99,17 @@ async def _host_exists(name: str) -> bool:
 
 
 _FRR_BIN = "/usr/libexec/frr"  # FRR binary dir on RHEL
-_FRR_DAEMONS = ["zebra", "staticd", "bgpd", "ospfd"]
+_FRR_DAEMONS = ["zebra", "mgmtd", "staticd", "bgpd", "ospfd"]
 
 
 async def _start_frr_in_netns(name: str) -> str:
-    """Start FRR daemons (zebra, staticd, bgpd, ospfd) inside a netns."""
+    """Start FRR daemons (zebra, mgmtd, staticd, bgpd, ospfd) inside a netns."""
     conf_dir = f"/etc/frr/{name}"
     run_dir = f"/var/run/frr/{name}"
 
-    # Create dirs
+    # Create dirs with correct ownership (frr:frr) so daemons can write PID files
     await ssh_exec(f"mkdir -p {conf_dir} {run_dir}")
+    await ssh_exec(f"chown -R frr:frr {conf_dir} {run_dir}")
 
     # Write integrated config
     frr_conf = (
@@ -427,32 +428,19 @@ async def delete_cloud(
     name: str,
     orch: Orchestrator = Depends(get_orchestrator),
 ):
-    """Delete an Internet/cloud node and clean up any macvlan interfaces."""
+    """Delete an Internet/cloud node and clean up WAN veth pairs."""
     if name not in _cloud_nodes:
         # Allow deleting even if not in memory (topology might have been refreshed)
         pass
     _cloud_nodes.pop(name, None)
 
-    # Clean up any macvlan interfaces (wan-*) in any router namespaces
-    ns_r = await ssh_exec("ip netns list 2>/dev/null")
-    if ns_r.returncode == 0:
-        for line in ns_r.stdout.splitlines():
-            ns_name = line.split()[0].strip() if line.strip() else ""
-            if not ns_name:
-                continue
-            # Find macvlan interfaces
-            mv_r = await ssh_exec(
-                f"ip netns exec {ns_name} ip -o link show type macvlan 2>/dev/null"
-            )
-            if mv_r.returncode == 0 and mv_r.stdout.strip():
-                for mline in mv_r.stdout.splitlines():
-                    if "wan-" in mline:
-                        parts = mline.split(":")
-                        if len(parts) >= 2:
-                            iface = parts[1].strip().split("@")[0]
-                            await ssh_exec(
-                                f"ip netns exec {ns_name} ip link del {iface} 2>/dev/null"
-                            )
+    # Clean up host-side veth interfaces (wh-*) — deleting these also removes the peer (wan-*)
+    wh_r = await ssh_exec("ip -o link show | grep 'wh-' | awk -F': ' '{print $2}'")
+    if wh_r.returncode == 0 and wh_r.stdout.strip():
+        for iface in wh_r.stdout.splitlines():
+            iface = iface.strip().split("@")[0]
+            if iface.startswith("wh-"):
+                await ssh_exec(f"ip link del {iface} 2>/dev/null")
 
     logger.info("Deleted cloud node: %s", name)
     return {"success": True, "message": f"Internet node '{name}' deleted"}
@@ -638,62 +626,83 @@ async def create_link(
             "interfaces": {src_name: veth_a, tgt_name: veth_b},
         }
 
-    # ── vrouter ↔ cloud (macvlan to physical interface for Internet) ──
+    # ── vrouter ↔ cloud (veth + NAT for Internet access) ──
     if (src_type == "vrouter" and tgt_type == "cloud") or \
        (src_type == "cloud" and tgt_type == "vrouter"):
         router_name = src_name if src_type == "vrouter" else tgt_name
 
         suffix = _rand_suffix(4)
-        macvlan_name = f"wan-{suffix}"
+        veth_ns = f"wan-{suffix}"      # inside router namespace
+        veth_host = f"wh-{suffix}"     # stays in root namespace
 
-        # Create macvlan on host physical interface
-        r = await ssh_exec(
-            f"ip link add {macvlan_name} link enp0s1 type macvlan mode bridge"
-        )
-        if r.returncode != 0:
-            raise HTTPException(500, detail=f"Failed to create macvlan: {r.stderr}")
+        # Allocate a /30 subnet from 10.255.{n}.{0,4,8,...}/30
+        # Find an available one by checking existing wh-* interfaces
+        existing_r = await ssh_exec("ip -br addr show | grep '^wh-' | awk '{print $3}'")
+        used_subnets = set()
+        for line in (existing_r.stdout or "").splitlines():
+            if "/" in line:
+                used_subnets.add(line.split("/")[0])
 
-        # Move macvlan to router namespace
-        r = await ssh_exec(f"ip link set {macvlan_name} netns {router_name}")
-        if r.returncode != 0:
-            await ssh_exec(f"ip link del {macvlan_name} 2>/dev/null")
-            raise HTTPException(500, detail=f"Failed to move macvlan: {r.stderr}")
-
-        # Bring up
-        await ssh_exec(f"ip netns exec {router_name} ip link set {macvlan_name} up")
-
-        # Find an available IP on the 192.168.64.0/24 network (DHCP-like)
-        # Try .100–.199 range to avoid clashing with DHCP pool
-        assigned_ip = None
-        for octet in range(100, 200):
-            test_ip = f"192.168.64.{octet}"
-            ping_r = await ssh_exec(f"ping -c 1 -W 1 {test_ip} 2>/dev/null")
-            if ping_r.returncode != 0:  # not in use
-                assigned_ip = test_ip
+        gw_ip = router_ip = None
+        for n in range(1, 255):
+            candidate_gw = f"10.255.0.{n * 4 + 1}"
+            if candidate_gw not in used_subnets:
+                gw_ip = candidate_gw
+                router_ip = f"10.255.0.{n * 4 + 2}"
                 break
 
-        if not assigned_ip:
-            # fallback: just use the provided IP or a random one
-            assigned_ip = req.ip.split('/')[0] if req.ip else f"192.168.64.{random.randint(100, 199)}"
+        if not gw_ip:
+            raise HTTPException(500, detail="No available /30 subnet for cloud link")
 
-        # Assign IP and default route
+        # Create veth pair
+        r = await ssh_exec(f"ip link add {veth_ns} type veth peer name {veth_host}")
+        if r.returncode != 0:
+            raise HTTPException(500, detail=f"Failed to create veth pair: {r.stderr}")
+
+        # Move one end to router namespace
+        r = await ssh_exec(f"ip link set {veth_ns} netns {router_name}")
+        if r.returncode != 0:
+            await ssh_exec(f"ip link del {veth_host} 2>/dev/null")
+            raise HTTPException(500, detail=f"Failed to move veth to namespace: {r.stderr}")
+
+        # Configure host-side: assign gateway IP, bring up
+        await ssh_exec(f"ip addr add {gw_ip}/30 dev {veth_host}")
+        await ssh_exec(f"ip link set {veth_host} up")
+
+        # Configure router-side: assign IP, bring up, set default route
+        await ssh_exec(f"ip netns exec {router_name} ip link set {veth_ns} up")
+        await ssh_exec(f"ip netns exec {router_name} ip addr add {router_ip}/30 dev {veth_ns}")
         await ssh_exec(
-            f"ip netns exec {router_name} ip addr add {assigned_ip}/24 dev {macvlan_name}"
+            f"ip netns exec {router_name} ip route replace default via {gw_ip} dev {veth_ns}"
         )
+
+        # Enable IP forwarding on host + NAT masquerade
+        await ssh_exec("sysctl -w net.ipv4.ip_forward=1 >/dev/null")
+        # Add masquerade rule (idempotent: check first)
+        check_nat = await ssh_exec(
+            "iptables -t nat -C POSTROUTING -s 10.255.0.0/16 -o enp0s1 -j MASQUERADE 2>/dev/null"
+        )
+        if check_nat.returncode != 0:
+            await ssh_exec(
+                "iptables -t nat -A POSTROUTING -s 10.255.0.0/16 -o enp0s1 -j MASQUERADE"
+            )
+
+        # Copy host DNS config to namespace so name resolution works
         await ssh_exec(
-            f"ip netns exec {router_name} ip route add default via 192.168.64.1 dev {macvlan_name}"
+            f"cp /etc/resolv.conf /etc/netns/{router_name}/resolv.conf 2>/dev/null"
+            f" || (mkdir -p /etc/netns/{router_name} && cp /etc/resolv.conf /etc/netns/{router_name}/resolv.conf)"
         )
 
         logger.info(
-            "Linked router %s to Internet via macvlan %s (IP: %s)",
-            router_name, macvlan_name, assigned_ip,
+            "Linked router %s to Internet via veth %s/%s (router: %s, gw: %s)",
+            router_name, veth_ns, veth_host, router_ip, gw_ip,
         )
         return {
             "success": True,
-            "message": f"Linked {router_name} → Internet (IP: {assigned_ip}/24, gw: 192.168.64.1)",
+            "message": f"Linked {router_name} → Internet (IP: {router_ip}/30, gw: {gw_ip})",
             "link_type": "router-cloud",
-            "interface": macvlan_name,
-            "ip": f"{assigned_ip}/24",
+            "interface": veth_ns,
+            "ip": f"{router_ip}/30",
         }
 
     raise HTTPException(400, detail=f"Unsupported link: {src_type} ↔ {tgt_type}")

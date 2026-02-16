@@ -26,7 +26,7 @@ async def test_topology_node_structure(client):
         assert "type" in node
         assert "name" in node
         assert "metadata" in node
-        assert node["type"] in ("switch", "router", "host", "network")
+        assert node["type"] in ("switch", "router", "host", "network", "cloud")
 
 
 @pytest.mark.asyncio
