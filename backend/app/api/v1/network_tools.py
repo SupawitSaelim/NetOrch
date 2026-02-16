@@ -185,7 +185,7 @@ async def mac_table(req: MacRequest):
     """Get MAC address (FDB) table from an OVS bridge."""
     bridge = _validate_name(req.bridge, "bridge")
 
-    # Try ovs-appctl fdb/show first (best for OVS bridges)
+    # Try ovs-appctl fdb/show first (best for OVS bridges in standalone mode)
     r = await ssh_exec(f"ovs-appctl fdb/show {bridge}")
 
     entries = []
@@ -203,25 +203,71 @@ async def mac_table(req: MacRequest):
                     'age': parts[3],
                 }
                 entries.append(entry)
-    else:
-        # Fallback: try ovs-ofctl dump-flows (extract dl_dst / dl_src MACs)
-        r2 = await ssh_exec(f"ovs-ofctl dump-flows {bridge}")
+
+    # If FDB is empty (common when OpenFlow controller manages forwarding),
+    # use dump-ports-desc to get port MACs + peer namespace endpoint MACs.
+    if not entries:
+        # Detect OpenFlow version (try 1.3 first, fall back to 1.0)
+        for of_ver in ("OpenFlow13", "OpenFlow10"):
+            r2 = await ssh_exec(
+                f"ovs-ofctl -O {of_ver} dump-ports-desc {bridge}"
+            )
+            if r2.returncode == 0:
+                break
+        else:
+            r2 = await ssh_exec(f"ovs-ofctl dump-ports-desc {bridge}")
+
         if r2.returncode == 0:
-            seen_macs: set = set()
-            for line in r2.stdout.strip().split('\n'):
-                for mac_match in re.finditer(r'dl_(?:src|dst)=([0-9a-fA-F:]{17})', line):
-                    mac_addr = mac_match.group(1)
-                    if mac_addr not in seen_macs:
-                        seen_macs.add(mac_addr)
-                        direction = 'src' if 'dl_src=' + mac_addr in line else 'dst'
-                        entries.append({
-                            'port': '—',
-                            'vlan': '—',
-                            'mac': mac_addr,
-                            'age': '—',
-                            'source': f'flow ({direction})',
-                        })
-            r = r2  # use for output
+            # Parse:  1(router1-veth0): addr:aa:bb:cc:dd:ee:ff
+            port_re = re.compile(
+                r'^\s*(\d+)\(([^)]+)\):\s+addr:([0-9a-fA-F:]{17})'
+            )
+            for line in r2.stdout.split('\n'):
+                m = port_re.match(line.strip())
+                if not m:
+                    continue
+                port_num = m.group(1)
+                port_name = m.group(2)
+                port_mac = m.group(3)
+
+                # Try to discover the endpoint MAC inside the peer namespace.
+                # Port names like "pc1-veth" or "router1-veth0" → namespace "pc1" / "router1"
+                endpoint_mac = ""
+                ns_name = ""
+                for suffix in ("-veth0", "-veth"):
+                    if port_name.endswith(suffix):
+                        ns_name = port_name[: -len(suffix)]
+                        break
+
+                if ns_name:
+                    # List interfaces in the namespace to find the real endpoint MAC
+                    r3 = await ssh_exec(
+                        f"ip netns exec {ns_name} ip -br link show 2>/dev/null"
+                    )
+                    if r3.returncode == 0:
+                        for iface_line in r3.stdout.strip().split('\n'):
+                            iface_parts = iface_line.split()
+                            if len(iface_parts) >= 3:
+                                iface_name = iface_parts[0].split('@')[0]
+                                # Skip lo and tunnel interfaces
+                                if iface_name in ('lo', 'gre0', 'gretap0', 'erspan0'):
+                                    continue
+                                # Match the namespace's own eth interface (e.g. pc1-eth0)
+                                if iface_name.startswith(ns_name):
+                                    endpoint_mac = iface_parts[2]
+                                    break
+
+                entries.append({
+                    'port': port_num,
+                    'vlan': '0',
+                    'mac': endpoint_mac or port_mac,
+                    'age': '—',
+                    'source': 'port-desc',
+                    'port_name': port_name,
+                    'endpoint': ns_name or '—',
+                })
+
+            r = r2  # use for raw output
 
     return {
         "success": r.returncode == 0,

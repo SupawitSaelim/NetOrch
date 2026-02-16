@@ -559,7 +559,12 @@ export default function NetworkToolsPage() {
               )}
 
               {/* MAC table entries */}
-              {activeResult.tool === 'mac' && activeResult.entries && activeResult.entries.length > 0 && (
+              {activeResult.tool === 'mac' && activeResult.entries && activeResult.entries.length > 0 && (() => {
+                const hasEndpoint = activeResult.entries.some((e: any) => e.endpoint && e.endpoint !== '—');
+                const hasPortName = activeResult.entries.some((e: any) => e.port_name);
+                const hasSource = activeResult.entries.some((e: any) => e.source);
+                const headers = ['Port', ...(hasPortName ? ['Port Name'] : []), ...(hasEndpoint ? ['Endpoint'] : []), 'VLAN', 'MAC Address', 'Age', ...(hasSource ? ['Source'] : [])];
+                return (
                 <div style={{ marginBottom: 16 }}>
                   <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text)', marginBottom: 10 }}>
                     📟 {activeResult.entries.length} MAC {activeResult.entries.length === 1 ? 'entry' : 'entries'}
@@ -570,7 +575,7 @@ export default function NetworkToolsPage() {
                     <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
                       <thead>
                         <tr style={{ background: 'var(--color-bg)' }}>
-                          {['Port', 'VLAN', 'MAC Address', 'Age', ...(activeResult.entries.some(e => e.source) ? ['Source'] : [])].map((h) => (
+                          {headers.map((h) => (
                             <th key={h} style={{
                               padding: '10px 14px', textAlign: 'left', fontWeight: 700,
                               fontSize: 10, color: 'var(--color-text-muted)', textTransform: 'uppercase',
@@ -580,7 +585,7 @@ export default function NetworkToolsPage() {
                         </tr>
                       </thead>
                       <tbody>
-                        {activeResult.entries.map((entry, i) => (
+                        {activeResult.entries.map((entry: any, i: number) => (
                           <tr key={i} style={{
                             background: i % 2 === 0 ? 'transparent' : 'var(--color-bg)',
                           }}>
@@ -590,6 +595,19 @@ export default function NetworkToolsPage() {
                                 background: '#8b5cf620', color: '#8b5cf6',
                               }}>{entry.port}</span>
                             </td>
+                            {hasPortName && (
+                              <td style={{ padding: '8px 14px', borderBottom: '1px solid var(--color-border)', fontSize: 11, color: 'var(--color-text-muted)' }}>
+                                {entry.port_name || '—'}
+                              </td>
+                            )}
+                            {hasEndpoint && (
+                              <td style={{ padding: '8px 14px', borderBottom: '1px solid var(--color-border)' }}>
+                                <span style={{
+                                  padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 600,
+                                  background: '#22c55e20', color: '#22c55e',
+                                }}>{entry.endpoint || '—'}</span>
+                              </td>
+                            )}
                             <td style={{ padding: '8px 14px', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
                               {entry.vlan}
                             </td>
@@ -599,9 +617,9 @@ export default function NetworkToolsPage() {
                             <td style={{ padding: '8px 14px', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
                               {entry.age}
                             </td>
-                            {entry.source && (
+                            {hasSource && (
                               <td style={{ padding: '8px 14px', borderBottom: '1px solid var(--color-border)', fontSize: 10, color: 'var(--color-text-muted)' }}>
-                                {entry.source}
+                                {entry.source || ''}
                               </td>
                             )}
                           </tr>
@@ -610,7 +628,8 @@ export default function NetworkToolsPage() {
                     </table>
                   </div>
                 </div>
-              )}
+                );
+              })()}
 
               {/* Raw output */}
               <div style={{

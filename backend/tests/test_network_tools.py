@@ -154,6 +154,77 @@ async def test_mac_table_invalid_bridge(client):
     assert r.status_code == 400
 
 
+_MOCK_PORTS_DESC = """\
+OFPST_PORT_DESC reply (OF1.3) (xid=0x2):
+ 1(router1-veth0): addr:aa:d2:75:ad:68:cc
+     config:     0
+     state:      LIVE
+     current:    10GB-FD COPPER
+     speed: 10000 Mbps now, 0 Mbps max
+ 2(pc1-veth): addr:5e:0a:9e:24:9a:d8
+     config:     0
+     state:      LIVE
+     current:    10GB-FD COPPER
+     speed: 10000 Mbps now, 0 Mbps max
+ LOCAL(sw1): addr:ce:6f:10:ea:82:4e
+     config:     0
+     state:      LIVE
+     speed: 0 Mbps now, 0 Mbps max
+"""
+
+_MOCK_NS_LINK_ROUTER1 = """\
+lo               UNKNOWN        00:00:00:00:00:00 <LOOPBACK,UP,LOWER_UP>
+gre0@NONE        DOWN           0.0.0.0 <NOARP>
+gretap0@NONE     DOWN           00:00:00:00:00:00 <BROADCAST,MULTICAST>
+erspan0@NONE     DOWN           00:00:00:00:00:00 <BROADCAST,MULTICAST>
+router1-eth0@if30 UP             de:3b:f4:69:26:a6 <BROADCAST,MULTICAST,UP,LOWER_UP>
+"""
+
+_MOCK_NS_LINK_PC1 = """\
+lo               UNKNOWN        00:00:00:00:00:00 <LOOPBACK,UP,LOWER_UP>
+gre0@NONE        DOWN           0.0.0.0 <NOARP>
+gretap0@NONE     DOWN           00:00:00:00:00:00 <BROADCAST,MULTICAST>
+erspan0@NONE     DOWN           00:00:00:00:00:00 <BROADCAST,MULTICAST>
+pc1-eth0@if40    UP             d6:cf:5f:74:9b:31 <BROADCAST,MULTICAST,UP,LOWER_UP>
+"""
+
+
+@pytest.mark.anyio
+async def test_mac_table_openflow_fallback(client):
+    """When FDB is empty (OpenFlow mode), falls back to dump-ports-desc + namespace MACs."""
+    async def _mock_openflow(command: str, timeout: int = 15) -> CmdResult:
+        cmd = command.strip()
+        if "fdb/show" in cmd:
+            # Empty FDB — only header
+            return CmdResult(" port  VLAN  MAC                Age", "", 0)
+        if "dump-ports-desc" in cmd:
+            return CmdResult(_MOCK_PORTS_DESC.strip(), "", 0)
+        if "ip netns exec router1" in cmd and "ip -br link" in cmd:
+            return CmdResult(_MOCK_NS_LINK_ROUTER1.strip(), "", 0)
+        if "ip netns exec pc1" in cmd and "ip -br link" in cmd:
+            return CmdResult(_MOCK_NS_LINK_PC1.strip(), "", 0)
+        return await _mock_ssh(command, timeout)
+
+    with patch("app.api.v1.network_tools.ssh_exec", side_effect=_mock_openflow):
+        r = await client.post("/api/v1/tools/mac", json={"bridge": "sw1"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["success"] is True
+    assert data["total"] == 2  # router1-veth0 + pc1-veth (LOCAL excluded)
+
+    # Should resolve endpoint MACs from namespaces
+    macs = {e['port_name']: e for e in data['entries']}
+    assert 'router1-veth0' in macs
+    assert macs['router1-veth0']['mac'] == 'de:3b:f4:69:26:a6'  # endpoint MAC
+    assert macs['router1-veth0']['endpoint'] == 'router1'
+    assert macs['router1-veth0']['port'] == '1'
+
+    assert 'pc1-veth' in macs
+    assert macs['pc1-veth']['mac'] == 'd6:cf:5f:74:9b:31'  # endpoint MAC
+    assert macs['pc1-veth']['endpoint'] == 'pc1'
+    assert macs['pc1-veth']['port'] == '2'
+
+
 @pytest.mark.anyio
 async def test_list_bridges(client):
     with patch("app.api.v1.network_tools.ssh_exec", side_effect=_mock_ssh):
