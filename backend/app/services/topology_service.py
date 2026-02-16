@@ -204,7 +204,37 @@ class TopologyService:
                     _add_link("router-001", net_id, iface_name, "",
                               bw=1000, status=status)
 
-            # ---- 5) Physical uplink interface (enp0s*) ----
+            # ---- 5) Standalone hosts (network namespaces not yet linked) ----
+            ns_r = await ssh_exec("ip netns list 2>/dev/null")
+            if ns_r.returncode == 0:
+                for ns_line in ns_r.stdout.splitlines():
+                    # ip netns list outputs "name" or "name (id: N)"
+                    ns_name = ns_line.split()[0].strip() if ns_line.strip() else ""
+                    if not ns_name:
+                        continue
+                    veth_host = f"{ns_name}-veth"
+                    host_id = f"host-{veth_host}"
+                    if host_id not in node_ids:
+                        # Get IP from inside the namespace
+                        ip_r = await ssh_exec(
+                            f"ip netns exec {ns_name} ip -4 addr show dev {ns_name}-eth0 2>/dev/null"
+                            " | grep inet | awk '{print $2}'")
+                        host_ip = ip_r.stdout.strip() if ip_r.returncode == 0 else ""
+                        meta: dict[str, Any] = {}
+                        if host_ip:
+                            meta["ip"] = host_ip
+                        # Check if veth exists on host side
+                        vstate_r = await ssh_exec(
+                            f"cat /sys/class/net/{veth_host}/operstate 2>/dev/null || echo down")
+                        vstatus = "up" if vstate_r.stdout.strip() in ("up", "unknown") else "down"
+                        _add_node(host_id, "host", veth_host)
+                        # Store IP in metadata
+                        for n in nodes:
+                            if n["id"] == host_id:
+                                n["metadata"].update(meta)
+                                break
+
+            # ---- 6) Physical uplink interface (enp0s*) ----
             iface_r = await ssh_exec("ip -br link | grep '^enp'")
             if iface_r.returncode == 0:
                 for iline in iface_r.stdout.splitlines():

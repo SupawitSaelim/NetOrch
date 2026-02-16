@@ -130,7 +130,27 @@ export default function TopologyPage() {
   const createSwitchMut = useMutation({
     mutationFn: (data: { name: string; x?: number; y?: number; protocols?: string; controller?: string }) =>
       createSwitch(data),
-    onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['topology'] }); flash(r.data.message); },
+    onSuccess: (r, vars) => {
+      // Optimistic: add switch to cache immediately
+      qc.setQueryData(['topology'], (old: Topology | undefined) => {
+        if (!old) return old;
+        const newId = `switch-${String(old.nodes.filter(n => n.type === 'switch').length + 1).padStart(3, '0')}`;
+        return {
+          ...old,
+          nodes: [...old.nodes, {
+            id: newId, type: 'switch' as const, name: vars.name,
+            dpid: null, metadata: { x: vars.x ?? 400, y: vars.y ?? 300 },
+          }],
+          links: [...old.links, {
+            id: `link-new-${Date.now()}`, source: 'router-001', target: newId,
+            source_port: 'internal', target_port: vars.name,
+            bandwidth: 10000, status: 'up' as const,
+          }],
+        };
+      });
+      qc.invalidateQueries({ queryKey: ['topology'] });
+      flash(r.data.message);
+    },
     onError: (e: any) => flash(e?.response?.data?.detail ?? 'Failed to create switch', 'err'),
   });
 
@@ -157,7 +177,24 @@ export default function TopologyPage() {
   const createHostMut = useMutation({
     mutationFn: (data: { name: string; ip?: string; x?: number; y?: number; gateway?: string }) =>
       createHost(data),
-    onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['topology'] }); flash(r.data.message); },
+    onSuccess: (r, vars) => {
+      // Optimistic: add host to cache immediately
+      const vethName = `${vars.name}-veth`;
+      qc.setQueryData(['topology'], (old: Topology | undefined) => {
+        if (!old) return old;
+        const hostId = `host-${vethName}`;
+        if (old.nodes.some(n => n.id === hostId)) return old;
+        return {
+          ...old,
+          nodes: [...old.nodes, {
+            id: hostId, type: 'host' as const, name: vethName,
+            dpid: null, metadata: { x: vars.x ?? 400, y: vars.y ?? 400, ip: vars.ip },
+          }],
+        };
+      });
+      qc.invalidateQueries({ queryKey: ['topology'] });
+      flash(r.data.message);
+    },
     onError: (e: any) => flash(e?.response?.data?.detail ?? 'Failed to create host', 'err'),
   });
 
