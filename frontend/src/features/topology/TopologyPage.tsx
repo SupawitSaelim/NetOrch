@@ -15,6 +15,7 @@ import {
 import type { Topology } from '../../types';
 import { SkeletonCard, ErrorBanner } from '../../components/Shared';
 import { useEffect, useRef, useState, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import * as d3 from 'd3';
 
 /* ═══════════════════════════════════════════════════════════════
@@ -879,40 +880,6 @@ export default function TopologyPage() {
           )}
           <svg ref={svgRef} width={dimensions.width} height={dimensions.height} style={{ display: 'block', width: '100%', height: '100%' }} />
 
-          {/* Context Menu */}
-          {contextMenu && (
-            <>
-              <div onClick={() => setContextMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 100 }} />
-              <div style={{
-                position: 'fixed', left: contextMenu.x, top: contextMenu.y, zIndex: 101,
-                background: 'var(--color-bg-card, #1e293b)', border: '1px solid var(--color-border, #334155)',
-                borderRadius: 10, padding: 4, minWidth: 180, boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
-                backdropFilter: 'blur(12px)',
-              }}>
-                <div style={{ padding: '6px 12px', fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600, borderBottom: '1px solid var(--color-border, #334155)' }}>
-                  🔀 {contextMenu.node.name}
-                </div>
-                <button
-                  onClick={() => {
-                    window.open(`/terminal/router/${contextMenu.node.name}`, '_blank');
-                    setContextMenu(null);
-                  }}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px',
-                    border: 'none', background: 'transparent', color: 'var(--color-text)', fontSize: 13,
-                    cursor: 'pointer', borderRadius: 6, textAlign: 'left',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.15)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                >
-                  <span style={{ fontSize: 16 }}>💻</span>
-                  Open CLI Terminal
-                  <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--color-text-muted)' }}>↗ new tab</span>
-                </button>
-              </div>
-            </>
-          )}
-
           {/* Tooltip */}
           {tooltip && (
             <div style={{ position: 'absolute', left: tooltip.x, top: tooltip.y, background: 'rgba(15,23,42,0.95)', border: '1px solid rgba(59,130,246,0.3)', borderRadius: 8, padding: '10px 14px', fontSize: 12, color: '#e2e8f0', pointerEvents: 'none', zIndex: 10, minWidth: 160, backdropFilter: 'blur(8px)', boxShadow: '0 8px 24px rgba(0,0,0,0.4)' }}>
@@ -1185,6 +1152,41 @@ export default function TopologyPage() {
             </button>
           </div>
         </DialogOverlay>
+      )}
+
+      {/* Context Menu — rendered via portal at document.body for correct fixed positioning */}
+      {contextMenu && createPortal(
+        <>
+          <div onClick={() => setContextMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 9998 }} />
+          <div style={{
+            position: 'fixed', left: contextMenu.x, top: contextMenu.y, zIndex: 9999,
+            background: 'var(--color-bg-card, #1e293b)', border: '1px solid var(--color-border, #334155)',
+            borderRadius: 10, padding: 4, minWidth: 180, boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
+            backdropFilter: 'blur(12px)',
+          }}>
+            <div style={{ padding: '6px 12px', fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600, borderBottom: '1px solid var(--color-border, #334155)' }}>
+              🔀 {contextMenu.node.name}
+            </div>
+            <button
+              onClick={() => {
+                window.open(`/terminal/router/${contextMenu.node.name}`, '_blank');
+                setContextMenu(null);
+              }}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px',
+                border: 'none', background: 'transparent', color: 'var(--color-text)', fontSize: 13,
+                cursor: 'pointer', borderRadius: 6, textAlign: 'left',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.15)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              <span style={{ fontSize: 16 }}>💻</span>
+              Open CLI Terminal
+              <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--color-text-muted)' }}>↗ new tab</span>
+            </button>
+          </div>
+        </>,
+        document.body
       )}
 
       {/* Router Link IP Dialog */}
