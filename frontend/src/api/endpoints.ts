@@ -133,6 +133,12 @@ export const createRouter = (data: {
 export const deleteRouter = (name: string) =>
   client.delete<{ success: boolean; message: string }>(`/topology/builder/routers/${name}`);
 
+export const createCloud = (data: { name: string; x?: number; y?: number }) =>
+  client.post<{ success: boolean; message: string; name: string }>('/topology/builder/clouds', data);
+
+export const deleteCloud = (name: string) =>
+  client.delete<{ success: boolean; message: string }>(`/topology/builder/clouds/${name}`);
+
 export const createLink = (data: {
   source_id: string;
   target_id: string;

@@ -375,7 +375,43 @@ class TopologyService:
                     _add_link(vrouter_id, peer_id, iface_name, iface_name,
                               bw=1000, status=lstatus)
 
-            # ---- 7) Physical uplink interface (enp0s*) ----
+            # ---- 7) Cloud (Internet) nodes ----
+            from app.api.v1.topology_builder import _cloud_nodes
+            for cloud_name in _cloud_nodes:
+                cloud_id = f"cloud-{cloud_name}"
+                _add_node(cloud_id, "cloud", cloud_name)
+
+            # ---- 8) Router-to-cloud links (macvlan wan-* interfaces) ----
+            for rname in vrouter_names:
+                vrouter_id = f"vrouter-{rname}"
+                mv_r = await ssh_exec(
+                    f"ip netns exec {rname} ip -o link show type macvlan 2>/dev/null"
+                )
+                if mv_r.returncode == 0 and mv_r.stdout.strip():
+                    for mline in mv_r.stdout.splitlines():
+                        if "wan-" not in mline:
+                            continue
+                        parts = mline.split(":")
+                        if len(parts) < 2:
+                            continue
+                        iface = parts[1].strip().split("@")[0]
+                        # Find which cloud to link to (use first available)
+                        cloud_id = None
+                        for cn in _cloud_nodes:
+                            cloud_id = f"cloud-{cn}"
+                            break
+                        if not cloud_id:
+                            # No cloud node registered — create a default one
+                            cloud_id = "cloud-internet"
+                            _add_node(cloud_id, "cloud", "internet")
+                        st_r = await ssh_exec(
+                            f"ip netns exec {rname} cat /sys/class/net/{iface}/operstate 2>/dev/null || echo unknown"
+                        )
+                        lstatus = "up" if st_r.stdout.strip() in ("up", "unknown") else "down"
+                        _add_link(vrouter_id, cloud_id, iface, "WAN",
+                                  bw=1000, status=lstatus)
+
+            # ---- 9) Physical uplink interface (enp0s*) ----
             iface_r = await ssh_exec("ip -br link | grep '^enp'")
             if iface_r.returncode == 0:
                 for iline in iface_r.stdout.splitlines():

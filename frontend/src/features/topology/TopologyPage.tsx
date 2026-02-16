@@ -10,6 +10,8 @@ import {
   deleteLink,
   createRouter,
   deleteRouter,
+  createCloud,
+  deleteCloud,
   clearAllTopology,
 } from '../../api/endpoints';
 import type { Topology } from '../../types';
@@ -24,13 +26,14 @@ import * as d3 from 'd3';
    ─ Drag-to-link, click to place, right-click to delete
    ═══════════════════════════════════════════════════════════════ */
 
-type BuilderMode = 'select' | 'addSwitch' | 'addHost' | 'addRouter' | 'addLink' | 'delete';
+type BuilderMode = 'select' | 'addSwitch' | 'addHost' | 'addRouter' | 'addCloud' | 'addLink' | 'delete';
 
 const NODE_COLORS: Record<string, string> = {
   switch: '#3b82f6',
   router: '#22c55e',
   host: '#a78bfa',
   network: '#f59e0b',
+  cloud: '#ec4899',
 };
 
 const NODE_LABELS: Record<string, string> = {
@@ -38,6 +41,7 @@ const NODE_LABELS: Record<string, string> = {
   router: '⬢',
   host: '◉',
   network: '◎',
+  cloud: '☁',
 };
 
 // ── D3 types ──
@@ -75,6 +79,10 @@ interface CreateRouterForm {
   name: string;
 }
 
+interface CreateCloudForm {
+  name: string;
+}
+
 /* ══════════════════════════ COMPONENT ══════════════════════════ */
 
 export default function TopologyPage() {
@@ -96,12 +104,14 @@ export default function TopologyPage() {
   const [showSwitchDialog, setShowSwitchDialog] = useState(false);
   const [showHostDialog, setShowHostDialog] = useState(false);
   const [showRouterDialog, setShowRouterDialog] = useState(false);
+  const [showCloudDialog, setShowCloudDialog] = useState(false);
   const [showLinkIpDialog, setShowLinkIpDialog] = useState(false);
   const [pendingLinkData, setPendingLinkData] = useState<{ source_id: string; target_id: string; source_name: string; target_name: string } | null>(null);
   const [linkIp, setLinkIp] = useState('');
   const [linkTargetIp, setLinkTargetIp] = useState('');
   const [pendingPosition, setPendingPosition] = useState<{ x: number; y: number } | null>(null);
   const [toast, setToast] = useState<{ msg: string; type: 'ok' | 'err' } | null>(null);
+  const [cloudForm, setCloudForm] = useState<CreateCloudForm>({ name: '' });
 
   // ── Properties panel ──
   const [propertiesNode, setPropertiesNode] = useState<SimNode | null>(null);
@@ -289,6 +299,46 @@ export default function TopologyPage() {
     onError: (e: any) => flash(e?.response?.data?.detail ?? 'Failed to delete router', 'err'),
   });
 
+  const createCloudMut = useMutation({
+    mutationFn: (data: { name: string; x?: number; y?: number }) => createCloud(data),
+    onSuccess: (r, vars) => {
+      qc.setQueryData(['topology'], (old: Topology | undefined) => {
+        if (!old) return old;
+        const cloudId = `cloud-${vars.name}`;
+        if (old.nodes.some(n => n.id === cloudId)) return old;
+        return {
+          ...old,
+          nodes: [...old.nodes, {
+            id: cloudId, type: 'cloud' as const, name: vars.name,
+            dpid: null, metadata: { x: vars.x ?? 400, y: vars.y ?? 100, gateway: '192.168.64.1' },
+          }],
+        };
+      });
+      qc.invalidateQueries({ queryKey: ['topology'] });
+      flash(r.data.message);
+    },
+    onError: (e: any) => flash(e?.response?.data?.detail ?? 'Failed to create cloud', 'err'),
+  });
+
+  const deleteCloudMut = useMutation({
+    mutationFn: (name: string) => deleteCloud(name),
+    onSuccess: (r, deletedName) => {
+      qc.setQueryData(['topology'], (old: Topology | undefined) => {
+        if (!old) return old;
+        const removedIds = new Set(old.nodes.filter(n => n.name === deletedName && n.type === 'cloud').map(n => n.id));
+        return {
+          ...old,
+          nodes: old.nodes.filter(n => !removedIds.has(n.id)),
+          links: old.links.filter(l => !removedIds.has(l.source) && !removedIds.has(l.target)),
+        };
+      });
+      qc.invalidateQueries({ queryKey: ['topology'] });
+      flash(r.data.message);
+      setPropertiesNode(null);
+    },
+    onError: (e: any) => flash(e?.response?.data?.detail ?? 'Failed to delete cloud', 'err'),
+  });
+
   const createLinkMut = useMutation({
     mutationFn: (data: { source_id: string; target_id: string; source_name: string; target_name: string; ip?: string; target_ip?: string }) =>
       createLink(data),
@@ -370,6 +420,19 @@ export default function TopologyPage() {
     setMode('select');
   };
 
+  const handleCreateCloud = () => {
+    if (!cloudForm.name.trim()) return;
+    createCloudMut.mutate({
+      name: cloudForm.name.trim(),
+      x: pendingPosition?.x,
+      y: pendingPosition?.y,
+    });
+    setShowCloudDialog(false);
+    setCloudForm({ name: '' });
+    setPendingPosition(null);
+    setMode('select');
+  };
+
   const handleCreateRouterLink = () => {
     if (!pendingLinkData) return;
     createLinkMut.mutate({ ...pendingLinkData, ip: linkIp || undefined, target_ip: linkTargetIp || undefined });
@@ -406,6 +469,7 @@ export default function TopologyPage() {
         if (propertiesNode.type === 'switch') deleteSwitchMut.mutate(propertiesNode.name);
         else if (propertiesNode.type === 'host') deleteHostMut.mutate(propertiesNode.name.replace('-veth', ''));
         else if (propertiesNode.type === 'router' && propertiesNode.id.startsWith('vrouter-')) deleteRouterMut.mutate(propertiesNode.name);
+        else if (propertiesNode.type === 'cloud') deleteCloudMut.mutate(propertiesNode.name);
       }
     };
     window.addEventListener('keydown', handler);
@@ -465,6 +529,7 @@ export default function TopologyPage() {
       if (m === 'addSwitch') { setPendingPosition({ x: mx, y: my }); setShowSwitchDialog(true); }
       else if (m === 'addHost') { setPendingPosition({ x: mx, y: my }); setShowHostDialog(true); }
       else if (m === 'addRouter') { setPendingPosition({ x: mx, y: my }); setShowRouterDialog(true); }
+      else if (m === 'addCloud') { setPendingPosition({ x: mx, y: my }); setShowCloudDialog(true); }
       else if (m === 'select') { setPropertiesNode(null); setLinkSource(null); }
     });
 
@@ -555,17 +620,17 @@ export default function TopologyPage() {
       .attr('class', 'node').style('cursor', 'grab');
 
     // Outer glow
-    nodeGs.append('circle').attr('r', 30)
+    nodeGs.append('circle').attr('r', (d) => d.type === 'cloud' ? 36 : 30)
       .attr('fill', (d) => NODE_COLORS[d.type] ?? '#94a3b8').attr('opacity', 0.1).attr('filter', 'url(#glow)');
     // Selection ring
-    nodeGs.append('circle').attr('class', 'select-ring').attr('r', 28)
+    nodeGs.append('circle').attr('class', 'select-ring').attr('r', (d) => d.type === 'cloud' ? 34 : 28)
       .attr('fill', 'none').attr('stroke', '#f59e0b').attr('stroke-width', 3).attr('stroke-dasharray', '6,3').attr('opacity', 0);
     // Outer ring
-    nodeGs.append('circle').attr('r', 25).attr('fill', 'none')
+    nodeGs.append('circle').attr('r', (d) => d.type === 'cloud' ? 31 : 25).attr('fill', 'none')
       .attr('stroke', (d) => NODE_COLORS[d.type] ?? '#94a3b8')
       .attr('stroke-width', 2).attr('stroke-opacity', 0.4).attr('stroke-dasharray', '4,3');
     // Main circle
-    nodeGs.append('circle').attr('r', 20)
+    nodeGs.append('circle').attr('r', (d) => d.type === 'cloud' ? 26 : 20)
       .attr('fill', (d) => NODE_COLORS[d.type] ?? '#94a3b8')
       .attr('stroke', (d) => d3.color(NODE_COLORS[d.type] ?? '#94a3b8')!.brighter(0.5).formatHex())
       .attr('stroke-width', 2);
@@ -573,7 +638,7 @@ export default function TopologyPage() {
     nodeGs.append('text')
       .text((d) => NODE_LABELS[d.type] ?? '●')
       .attr('text-anchor', 'middle').attr('dominant-baseline', 'central')
-      .attr('font-size', 16).attr('fill', '#fff').attr('pointer-events', 'none');
+      .attr('font-size', (d) => d.type === 'cloud' ? 22 : 16).attr('fill', '#fff').attr('pointer-events', 'none');
     // Name
     nodeGs.append('text').text((d) => d.name)
       .attr('dy', 38).attr('text-anchor', 'middle')
@@ -596,6 +661,8 @@ export default function TopologyPage() {
           if (confirm(`Delete host "${hostName}"?`)) deleteHostMut.mutate(hostName);
         } else if (d.type === 'router' && d.id.startsWith('vrouter-')) {
           if (confirm(`Delete router "${d.name}"?`)) deleteRouterMut.mutate(d.name);
+        } else if (d.type === 'cloud') {
+          if (confirm(`Delete Internet cloud "${d.name}"?`)) deleteCloudMut.mutate(d.name);
         } else {
           flash(`Cannot delete ${d.type} nodes from builder`, 'err');
         }
@@ -615,6 +682,15 @@ export default function TopologyPage() {
           const tgtIsRouter = d.id.startsWith('vrouter-');
           const srcIsSwitch = ls.id.startsWith('switch-');
           const tgtIsSwitch = d.id.startsWith('switch-');
+          const srcIsCloud = ls.id.startsWith('cloud-');
+          const tgtIsCloud = d.id.startsWith('cloud-');
+
+          // Cloud links — always router↔cloud, no IP dialog needed (auto-assigned)
+          if ((srcIsCloud && tgtIsRouter) || (srcIsRouter && tgtIsCloud)) {
+            createLinkMut.mutate({ source_id: ls.id, target_id: d.id, source_name: ls.name, target_name: d.name });
+            nodeGs.selectAll('.select-ring').attr('opacity', 0);
+            return;
+          }
 
           if ((srcIsRouter && tgtIsSwitch) || (srcIsSwitch && tgtIsRouter) || (srcIsRouter && tgtIsRouter)) {
             setPendingLinkData({ source_id: ls.id, target_id: d.id, source_name: ls.name, target_name: d.name });
@@ -729,12 +805,13 @@ export default function TopologyPage() {
     addSwitch: 'Click on the canvas to place a new switch (OVS bridge)',
     addHost: 'Click on the canvas to place a new virtual host',
     addRouter: 'Click on the canvas to place a new virtual router',
+    addCloud: 'Click on the canvas to place an Internet cloud gateway',
     addLink: linkSource ? `Click target node to link with "${linkSource.name}"` : 'Click a node as the link source, then click the target',
     delete: 'Click a node or link to delete it',
   };
 
   const modeColor: Record<BuilderMode, string> = {
-    select: '#64748b', addSwitch: '#3b82f6', addHost: '#a78bfa', addRouter: '#22c55e', addLink: '#f59e0b', delete: '#ef4444',
+    select: '#64748b', addSwitch: '#3b82f6', addHost: '#a78bfa', addRouter: '#22c55e', addCloud: '#ec4899', addLink: '#f59e0b', delete: '#ef4444',
   };
 
   const toolbarBtns: { mode: BuilderMode; icon: string; label: string; color: string }[] = [
@@ -742,14 +819,15 @@ export default function TopologyPage() {
     { mode: 'addSwitch', icon: '⬡', label: 'Add Switch', color: '#3b82f6' },
     { mode: 'addHost', icon: '◉', label: 'Add Host', color: '#a78bfa' },
     { mode: 'addRouter', icon: '🔀', label: 'Add Router', color: '#22c55e' },
+    { mode: 'addCloud', icon: '☁', label: 'Internet', color: '#ec4899' },
     { mode: 'addLink', icon: '🔗', label: 'Add Link', color: '#f59e0b' },
     { mode: 'delete', icon: '🗑', label: 'Delete', color: '#ef4444' },
   ];
 
   // ── Auto-layout: arrange nodes in layered rows by type ──
   const handleAutoLayout = useCallback(() => {
-    const layerOrder: Record<string, number> = { network: 0, router: 1, switch: 2, host: 3 };
-    const layerY: Record<number, number> = { 0: 80, 1: 220, 2: 360, 3: 500 };
+    const layerOrder: Record<string, number> = { cloud: -1, network: 0, router: 1, switch: 2, host: 3 };
+    const layerY: Record<number, number> = { [-1]: 30, 0: 80, 1: 220, 2: 360, 3: 500 };
     const w = dimensions.width;
 
     // Group nodes by layer
@@ -797,6 +875,7 @@ export default function TopologyPage() {
   const isAnyMutating = createSwitchMut.isPending || deleteSwitchMut.isPending
     || createHostMut.isPending || deleteHostMut.isPending
     || createRouterMut.isPending || deleteRouterMut.isPending
+    || createCloudMut.isPending || deleteCloudMut.isPending
     || createLinkMut.isPending || deleteLinkMut.isPending
     || clearAllMut.isPending || refreshMut.isPending;
 
@@ -877,7 +956,7 @@ export default function TopologyPage() {
           style={{
             flex: 1, position: 'relative', background: 'var(--color-bg-card)', border: '1px solid var(--color-border)',
             borderRadius: 12, overflow: 'hidden', minHeight: 720,
-            cursor: mode === 'addSwitch' || mode === 'addHost' || mode === 'addRouter' ? 'crosshair' : mode === 'delete' ? 'not-allowed' : 'default',
+            cursor: mode === 'addSwitch' || mode === 'addHost' || mode === 'addRouter' || mode === 'addCloud' ? 'crosshair' : mode === 'delete' ? 'not-allowed' : 'default',
             transition: 'margin-right 0.3s cubic-bezier(0.4,0,0.2,1)',
             marginRight: propertiesNode ? 296 : 0,
           }}>
@@ -889,6 +968,7 @@ export default function TopologyPage() {
               {mode === 'addSwitch' && '🔨 Click canvas to place Switch'}
               {mode === 'addHost' && '🔨 Click canvas to place Host'}
               {mode === 'addRouter' && '🔨 Click canvas to place Router'}
+              {mode === 'addCloud' && '☁️ Click canvas to place Internet Cloud'}
               {mode === 'addLink' && (linkSource ? `🔗 Click target → link with "${linkSource.name}"` : '🔗 Click source node')}
               {mode === 'delete' && '🗑️ Click a node or link to delete'}
             </div>
@@ -1013,7 +1093,20 @@ export default function TopologyPage() {
                 )}
               </div>
               {/* Delete button */}
-              {(propertiesNode.type === 'switch' || propertiesNode.type === 'host' || (propertiesNode.type === 'router' && propertiesNode.id.startsWith('vrouter-'))) && (
+              {/* Internet Cloud Info */}
+              {propertiesNode.type === 'cloud' && (
+                <div style={{ marginTop: 12, padding: '8px 10px', background: 'rgba(236,72,153,0.08)', borderRadius: 6, border: '1px solid rgba(236,72,153,0.15)' }}>
+                  <div style={{ fontWeight: 600, fontSize: 11, color: '#ec4899', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    <span>🌐</span> Internet Gateway
+                  </div>
+                  <div style={{ fontSize: 10, color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
+                    <div>Gateway: 192.168.64.1</div>
+                    <div>Subnet: 192.168.64.0/24</div>
+                    <div style={{ marginTop: 4 }}>Link a router to this cloud to provide Internet access via macvlan on the physical uplink.</div>
+                  </div>
+                </div>
+              )}
+              {(propertiesNode.type === 'switch' || propertiesNode.type === 'host' || propertiesNode.type === 'cloud' || (propertiesNode.type === 'router' && propertiesNode.id.startsWith('vrouter-'))) && (
                 <div style={{ marginTop: 16 }}>
                   <button
                     onClick={() => {
@@ -1021,6 +1114,7 @@ export default function TopologyPage() {
                       if (confirm(`Delete ${propertiesNode.type} "${name}"?`)) {
                         if (propertiesNode.type === 'switch') deleteSwitchMut.mutate(name);
                         else if (propertiesNode.type === 'host') deleteHostMut.mutate(name);
+                        else if (propertiesNode.type === 'cloud') deleteCloudMut.mutate(name);
                         else deleteRouterMut.mutate(name);
                       }
                     }}
@@ -1172,6 +1266,35 @@ export default function TopologyPage() {
               disabled={!routerForm.name.trim() || createRouterMut.isPending}
               style={{ ...primaryBtnStyle, background: '#22c55e', opacity: !routerForm.name.trim() ? 0.4 : 1 }}>
               {createRouterMut.isPending ? 'Creating…' : 'Create Router'}
+            </button>
+          </div>
+        </DialogOverlay>
+      )}
+
+      {/* Create Cloud Dialog */}
+      {showCloudDialog && (
+        <DialogOverlay onClose={() => { setShowCloudDialog(false); setPendingPosition(null); }}>
+          <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>
+            <span style={{ color: '#ec4899' }}>☁</span> Create Internet Cloud
+          </h3>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 16, padding: '8px 12px', background: 'rgba(236,72,153,0.08)', borderRadius: 8, border: '1px solid rgba(236,72,153,0.2)', lineHeight: 1.6 }}>
+            Represents the <strong>WAN / Internet gateway</strong> (192.168.64.1).<br />
+            Link a router to this cloud to create a <strong>macvlan</strong> interface on the physical uplink, giving it real Internet access with an auto-assigned IP.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <FieldLabel label="Cloud Name *">
+              <input autoFocus value={cloudForm.name}
+                onChange={(e) => setCloudForm({ ...cloudForm, name: e.target.value })}
+                placeholder="e.g. internet" style={inputStyle}
+                onKeyDown={(e) => e.key === 'Enter' && handleCreateCloud()} />
+            </FieldLabel>
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 20, justifyContent: 'flex-end' }}>
+            <button onClick={() => { setShowCloudDialog(false); setPendingPosition(null); }} style={cancelBtnStyle}>Cancel</button>
+            <button onClick={handleCreateCloud}
+              disabled={!cloudForm.name.trim() || createCloudMut.isPending}
+              style={{ ...primaryBtnStyle, background: '#ec4899', opacity: !cloudForm.name.trim() ? 0.4 : 1 }}>
+              {createCloudMut.isPending ? 'Creating…' : 'Create Cloud'}
             </button>
           </div>
         </DialogOverlay>

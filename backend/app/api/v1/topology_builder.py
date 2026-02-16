@@ -49,6 +49,12 @@ class CreateRouterRequest(BaseModel):
     y: float | None = None
 
 
+class CreateCloudRequest(BaseModel):
+    name: str
+    x: float | None = None
+    y: float | None = None
+
+
 class CreateLinkRequest(BaseModel):
     source_id: str  # topology node id (e.g. "switch-001")
     target_id: str  # topology node id
@@ -383,6 +389,75 @@ async def delete_router(name: str):
     return {"success": True, "message": f"Router '{name}' deleted"}
 
 
+# ── Cloud (Internet gateway) CRUD ────────────────────────────────
+
+# In-memory set of cloud nodes (they're purely visual + link targets)
+_cloud_nodes: dict[str, dict] = {}
+
+
+@router.post("/clouds", status_code=status.HTTP_201_CREATED)
+async def create_cloud(
+    req: CreateCloudRequest,
+    orch: Orchestrator = Depends(get_orchestrator),
+):
+    """Create an Internet/cloud node (visual + link target for WAN access)."""
+    name = req.name.strip().replace(" ", "-")
+    if not name:
+        raise HTTPException(400, detail="Name is required")
+    if name in _cloud_nodes:
+        raise HTTPException(409, detail=f"Cloud '{name}' already exists")
+
+    _cloud_nodes[name] = {"x": req.x, "y": req.y}
+
+    # Save position
+    cloud_id = f"cloud-{name}"
+    if req.x is not None and req.y is not None:
+        await orch.topology.update_node_position(cloud_id, {"x": req.x, "y": req.y})
+
+    logger.info("Created cloud node: %s", name)
+    return {
+        "success": True,
+        "message": f"Internet node '{name}' created",
+        "name": name,
+    }
+
+
+@router.delete("/clouds/{name}")
+async def delete_cloud(
+    name: str,
+    orch: Orchestrator = Depends(get_orchestrator),
+):
+    """Delete an Internet/cloud node and clean up any macvlan interfaces."""
+    if name not in _cloud_nodes:
+        # Allow deleting even if not in memory (topology might have been refreshed)
+        pass
+    _cloud_nodes.pop(name, None)
+
+    # Clean up any macvlan interfaces (wan-*) in any router namespaces
+    ns_r = await ssh_exec("ip netns list 2>/dev/null")
+    if ns_r.returncode == 0:
+        for line in ns_r.stdout.splitlines():
+            ns_name = line.split()[0].strip() if line.strip() else ""
+            if not ns_name:
+                continue
+            # Find macvlan interfaces
+            mv_r = await ssh_exec(
+                f"ip netns exec {ns_name} ip -o link show type macvlan 2>/dev/null"
+            )
+            if mv_r.returncode == 0 and mv_r.stdout.strip():
+                for mline in mv_r.stdout.splitlines():
+                    if "wan-" in mline:
+                        parts = mline.split(":")
+                        if len(parts) >= 2:
+                            iface = parts[1].strip().split("@")[0]
+                            await ssh_exec(
+                                f"ip netns exec {ns_name} ip link del {iface} 2>/dev/null"
+                            )
+
+    logger.info("Deleted cloud node: %s", name)
+    return {"success": True, "message": f"Internet node '{name}' deleted"}
+
+
 # ── Link CRUD ────────────────────────────────────────────────────
 
 @router.post("/links", status_code=status.HTTP_201_CREATED)
@@ -561,6 +636,64 @@ async def create_link(
                        + (f" (IPs: {req.ip}, {req.target_ip})" if req.ip else ""),
             "link_type": "router-router",
             "interfaces": {src_name: veth_a, tgt_name: veth_b},
+        }
+
+    # ── vrouter ↔ cloud (macvlan to physical interface for Internet) ──
+    if (src_type == "vrouter" and tgt_type == "cloud") or \
+       (src_type == "cloud" and tgt_type == "vrouter"):
+        router_name = src_name if src_type == "vrouter" else tgt_name
+
+        suffix = _rand_suffix(4)
+        macvlan_name = f"wan-{suffix}"
+
+        # Create macvlan on host physical interface
+        r = await ssh_exec(
+            f"ip link add {macvlan_name} link enp0s1 type macvlan mode bridge"
+        )
+        if r.returncode != 0:
+            raise HTTPException(500, detail=f"Failed to create macvlan: {r.stderr}")
+
+        # Move macvlan to router namespace
+        r = await ssh_exec(f"ip link set {macvlan_name} netns {router_name}")
+        if r.returncode != 0:
+            await ssh_exec(f"ip link del {macvlan_name} 2>/dev/null")
+            raise HTTPException(500, detail=f"Failed to move macvlan: {r.stderr}")
+
+        # Bring up
+        await ssh_exec(f"ip netns exec {router_name} ip link set {macvlan_name} up")
+
+        # Find an available IP on the 192.168.64.0/24 network (DHCP-like)
+        # Try .100–.199 range to avoid clashing with DHCP pool
+        assigned_ip = None
+        for octet in range(100, 200):
+            test_ip = f"192.168.64.{octet}"
+            ping_r = await ssh_exec(f"ping -c 1 -W 1 {test_ip} 2>/dev/null")
+            if ping_r.returncode != 0:  # not in use
+                assigned_ip = test_ip
+                break
+
+        if not assigned_ip:
+            # fallback: just use the provided IP or a random one
+            assigned_ip = req.ip.split('/')[0] if req.ip else f"192.168.64.{random.randint(100, 199)}"
+
+        # Assign IP and default route
+        await ssh_exec(
+            f"ip netns exec {router_name} ip addr add {assigned_ip}/24 dev {macvlan_name}"
+        )
+        await ssh_exec(
+            f"ip netns exec {router_name} ip route add default via 192.168.64.1 dev {macvlan_name}"
+        )
+
+        logger.info(
+            "Linked router %s to Internet via macvlan %s (IP: %s)",
+            router_name, macvlan_name, assigned_ip,
+        )
+        return {
+            "success": True,
+            "message": f"Linked {router_name} → Internet (IP: {assigned_ip}/24, gw: 192.168.64.1)",
+            "link_type": "router-cloud",
+            "interface": macvlan_name,
+            "ip": f"{assigned_ip}/24",
         }
 
     raise HTTPException(400, detail=f"Unsupported link: {src_type} ↔ {tgt_type}")

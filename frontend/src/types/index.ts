@@ -96,7 +96,7 @@ export interface SwitchPort {
 // --- Topology ---
 export interface TopologyNode {
   id: string;
-  type: 'switch' | 'router' | 'host';
+  type: 'switch' | 'router' | 'host' | 'network' | 'cloud';
   name: string;
   dpid: string | null;
   metadata: Record<string, unknown>;
