@@ -106,8 +106,12 @@ export default function TopologyPage() {
   // ── Properties panel ──
   const [propertiesNode, setPropertiesNode] = useState<SimNode | null>(null);
 
-  // ── Context menu ──
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; node: SimNode } | null>(null);
+  // ── Context menu (node or link) ──
+  const [contextMenu, setContextMenu] = useState<
+    | { x: number; y: number; kind: 'node'; node: SimNode }
+    | { x: number; y: number; kind: 'link'; link: SimLink }
+    | null
+  >(null);
 
   // ── D3 refs ──
   const svgRef = useRef<SVGSVGElement>(null);
@@ -481,15 +485,24 @@ export default function TopologyPage() {
       .attr('stroke', (d) => d.status === 'up' ? '#3b82f6' : '#ef4444')
       .attr('stroke-width', 6).attr('stroke-opacity', 0.15).attr('stroke-linecap', 'round');
 
+    // Invisible wide hit-area for easier click/right-click on links
+    const linkHitAreas = linkGroup.selectAll('.link-hit').data(simLinks).join('line')
+      .attr('class', 'link-hit')
+      .attr('stroke', 'transparent')
+      .attr('stroke-width', 14)
+      .attr('cursor', 'pointer')
+      .attr('pointer-events', 'stroke');
+
     const linkLines = linkGroup.selectAll('.link-line').data(simLinks).join('line')
       .attr('class', (d) => `link-line ${d.status === 'up' ? 'link-animated' : ''}`)
       .attr('stroke', (d) => d.status === 'up' ? '#475569' : '#ef4444')
       .attr('stroke-width', 2.5)
       .attr('stroke-dasharray', (d) => d.status === 'up' ? '8,4' : '5,5')
-      .attr('stroke-linecap', 'round').attr('marker-end', 'url(#arrowhead)');
+      .attr('stroke-linecap', 'round').attr('marker-end', 'url(#arrowhead)')
+      .attr('pointer-events', 'none'); // let hit-area handle events
 
-    // Delete link on click
-    linkLines.on('click', (event: MouseEvent, d: SimLink) => {
+    // Delete link on click (via hit-area)
+    linkHitAreas.on('click', (event: MouseEvent, d: SimLink) => {
       event.stopPropagation();
       if (modeRef.current === 'delete') {
         const srcName = typeof d.source === 'object' ? (d.source as SimNode).name : String(d.source);
@@ -498,6 +511,13 @@ export default function TopologyPage() {
           deleteLinkMut.mutate({ sourceName: srcName, targetName: tgtName });
         }
       }
+    });
+
+    // Right-click context menu on links
+    linkHitAreas.on('contextmenu', (event: MouseEvent, d: SimLink) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setContextMenu({ x: event.clientX, y: event.clientY, kind: 'link', link: d });
     });
 
     const linkLabels = linkGroup.selectAll('.link-label').data(simLinks).join('g').attr('class', 'link-label');
@@ -617,7 +637,7 @@ export default function TopologyPage() {
     nodeGs.on('contextmenu', function (event: MouseEvent, d: SimNode) {
       event.preventDefault();
       if (d.type === 'router' && d.id.startsWith('vrouter-')) {
-        setContextMenu({ x: event.clientX, y: event.clientY, node: d });
+        setContextMenu({ x: event.clientX, y: event.clientY, kind: 'node', node: d });
       }
     });
 
@@ -668,6 +688,9 @@ export default function TopologyPage() {
     // ── Tick ──
     simulation.on('tick', () => {
       linkGroup.selectAll<SVGLineElement, SimLink>('.link-glow')
+        .attr('x1', (d) => (d.source as SimNode).x!).attr('y1', (d) => (d.source as SimNode).y!)
+        .attr('x2', (d) => (d.target as SimNode).x!).attr('y2', (d) => (d.target as SimNode).y!);
+      linkHitAreas
         .attr('x1', (d) => (d.source as SimNode).x!).attr('y1', (d) => (d.source as SimNode).y!)
         .attr('x2', (d) => (d.target as SimNode).x!).attr('y2', (d) => (d.target as SimNode).y!);
       linkLines
@@ -1164,26 +1187,62 @@ export default function TopologyPage() {
             borderRadius: 10, padding: 4, minWidth: 180, boxShadow: '0 8px 32px rgba(0,0,0,0.5)',
             backdropFilter: 'blur(12px)',
           }}>
-            <div style={{ padding: '6px 12px', fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600, borderBottom: '1px solid var(--color-border, #334155)' }}>
-              🔀 {contextMenu.node.name}
-            </div>
-            <button
-              onClick={() => {
-                window.open(`/terminal/router/${contextMenu.node.name}`, '_blank');
-                setContextMenu(null);
-              }}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px',
-                border: 'none', background: 'transparent', color: 'var(--color-text)', fontSize: 13,
-                cursor: 'pointer', borderRadius: 6, textAlign: 'left',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.15)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-            >
-              <span style={{ fontSize: 16 }}>💻</span>
-              Open CLI Terminal
-              <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--color-text-muted)' }}>↗ new tab</span>
-            </button>
+            {contextMenu.kind === 'node' ? (
+              <>
+                <div style={{ padding: '6px 12px', fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600, borderBottom: '1px solid var(--color-border, #334155)' }}>
+                  🔀 {contextMenu.node.name}
+                </div>
+                <button
+                  onClick={() => {
+                    window.open(`/terminal/router/${contextMenu.node.name}`, '_blank');
+                    setContextMenu(null);
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px',
+                    border: 'none', background: 'transparent', color: 'var(--color-text)', fontSize: 13,
+                    cursor: 'pointer', borderRadius: 6, textAlign: 'left',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.15)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <span style={{ fontSize: 16 }}>💻</span>
+                  Open CLI Terminal
+                  <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--color-text-muted)' }}>↗ new tab</span>
+                </button>
+              </>
+            ) : (
+              <>
+                <div style={{ padding: '6px 12px', fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600, borderBottom: '1px solid var(--color-border, #334155)' }}>
+                  🔗 {typeof contextMenu.link.source === 'object' ? (contextMenu.link.source as SimNode).name : contextMenu.link.source}
+                  {' ↔ '}
+                  {typeof contextMenu.link.target === 'object' ? (contextMenu.link.target as SimNode).name : contextMenu.link.target}
+                </div>
+                <div style={{ padding: '4px 12px', fontSize: 11, color: 'var(--color-text-muted)' }}>
+                  {contextMenu.link.source_port && <span>Ports: {contextMenu.link.source_port} ↔ {contextMenu.link.target_port}</span>}
+                  {contextMenu.link.bandwidth && <span style={{ marginLeft: 8 }}>BW: {contextMenu.link.bandwidth}</span>}
+                </div>
+                <button
+                  onClick={() => {
+                    const srcName = typeof contextMenu.link.source === 'object' ? (contextMenu.link.source as SimNode).name : String(contextMenu.link.source);
+                    const tgtName = typeof contextMenu.link.target === 'object' ? (contextMenu.link.target as SimNode).name : String(contextMenu.link.target);
+                    if (confirm(`Delete link ${srcName} ↔ ${tgtName}?`)) {
+                      deleteLinkMut.mutate({ sourceName: srcName, targetName: tgtName });
+                    }
+                    setContextMenu(null);
+                  }}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px',
+                    border: 'none', background: 'transparent', color: '#ef4444', fontSize: 13,
+                    cursor: 'pointer', borderRadius: 6, textAlign: 'left',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239,68,68,0.15)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <span style={{ fontSize: 16 }}>🗑️</span>
+                  Delete Connection
+                </button>
+              </>
+            )}
           </div>
         </>,
         document.body
