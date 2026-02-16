@@ -1,12 +1,21 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { toolPing, toolTraceroute, toolArp, toolMac, toolListHosts, toolListBridges, getTopology } from '../../api/endpoints';
+import {
+  toolPing, toolTraceroute, toolArp, toolMac, toolCapture,
+  toolListHosts, toolListBridges, toolListInterfaces, getTopology,
+} from '../../api/endpoints';
 
 /* ═══════════════════════════════════════════════════════════════
-   Network Tools — Ping, Traceroute, ARP, MAC table
+   Network Tools — Ping, Traceroute, ARP, MAC, Packet Capture
    ═══════════════════════════════════════════════════════════════ */
 
-type Tool = 'ping' | 'traceroute' | 'arp' | 'mac';
+type Tool = 'ping' | 'traceroute' | 'arp' | 'mac' | 'capture';
+
+interface CapturePacket {
+  raw: string; timestamp?: string; src_mac?: string; dst_mac?: string;
+  ethertype?: string; src_ip?: string; dst_ip?: string;
+  protocol: string; length?: number; info: string;
+}
 
 interface HistoryEntry {
   id: number;
@@ -17,6 +26,7 @@ interface HistoryEntry {
   output: string;
   summary?: Record<string, unknown>;
   entries?: { port: string; vlan: string; mac: string; age: string; source?: string }[];
+  packets?: CapturePacket[];
   timestamp: Date;
 }
 
@@ -24,7 +34,13 @@ const TOOL_META: Record<Tool, { icon: string; label: string; color: string }> = 
   ping:       { icon: '🏓', label: 'Ping',       color: '#22c55e' },
   traceroute: { icon: '🗺️', label: 'Traceroute', color: '#3b82f6' },
   arp:        { icon: '📋', label: 'ARP Table',  color: '#f59e0b' },
-  mac:        { icon: '📟', label: 'MAC Table', color: '#8b5cf6' },
+  mac:        { icon: '📟', label: 'MAC Table',  color: '#8b5cf6' },
+  capture:    { icon: '🦈', label: 'Capture',    color: '#ef4444' },
+};
+
+const PROTO_COLORS: Record<string, string> = {
+  ICMP: '#22c55e', TCP: '#3b82f6', UDP: '#f59e0b',
+  ARP: '#a855f7', STP: '#6b7280', LLDP: '#64748b', other: '#94a3b8',
 };
 
 export default function NetworkToolsPage() {
@@ -33,6 +49,12 @@ export default function NetworkToolsPage() {
   const [target, setTarget] = useState('');
   const [count, setCount] = useState(4);
   const [bridge, setBridge] = useState('');
+  // Capture-specific state
+  const [captureIface, setCaptureIface] = useState('any');
+  const [captureFilter, setCaptureFilter] = useState('');
+  const [captureCount, setCaptureCount] = useState(20);
+  const [captureTimeout, setCaptureTimeout] = useState(10);
+
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [activeResult, setActiveResult] = useState<HistoryEntry | null>(null);
 
@@ -40,6 +62,16 @@ export default function NetworkToolsPage() {
   const hostsQ = useQuery({ queryKey: ['tool-hosts'], queryFn: () => toolListHosts().then(r => r.data.hosts) });
   const bridgesQ = useQuery({ queryKey: ['tool-bridges'], queryFn: () => toolListBridges().then(r => r.data.bridges) });
   const topoQ = useQuery({ queryKey: ['topology'], queryFn: () => getTopology().then(r => r.data) });
+
+  // Fetch interfaces for selected source (capture mode)
+  const ifaceQ = useQuery({
+    queryKey: ['tool-interfaces', source],
+    queryFn: () => toolListInterfaces(source || undefined).then(r => r.data.interfaces),
+    enabled: tool === 'capture',
+  });
+
+  // Reset interface when source changes
+  useEffect(() => { setCaptureIface('any'); }, [source]);
 
   // Build source options: netns hosts + topology hosts
   const hostOptions = (() => {
@@ -89,14 +121,24 @@ export default function NetworkToolsPage() {
     onError: (e: any) => addToHistory({ tool: 'mac', source: bridge, target: '', success: false, output: e?.response?.data?.detail ?? e.message }),
   });
 
-  const isRunning = pingMut.isPending || traceMut.isPending || arpMut.isPending || macMut.isPending;
+  const captureMut = useMutation({
+    mutationFn: () => toolCapture({ source, interface: captureIface, filter: captureFilter, count: captureCount, timeout: captureTimeout }),
+    onSuccess: (r) => addToHistory({
+      tool: 'capture', source: source || '(vm-root)', target: `${captureIface} ${captureFilter}`.trim(),
+      success: r.data.success, output: r.data.output, packets: r.data.packets,
+      summary: r.data.summary as Record<string, unknown>,
+    }),
+    onError: (e: any) => addToHistory({
+      tool: 'capture', source: source || '(vm-root)', target: captureIface,
+      success: false, output: e?.response?.data?.detail ?? e.message,
+    }),
+  });
+
+  const isRunning = pingMut.isPending || traceMut.isPending || arpMut.isPending || macMut.isPending || captureMut.isPending;
 
   const handleRun = () => {
-    if (tool === 'mac') {
-      if (!bridge) return;
-      macMut.mutate();
-      return;
-    }
+    if (tool === 'mac') { if (!bridge) return; macMut.mutate(); return; }
+    if (tool === 'capture') { captureMut.mutate(); return; }
     if (!source) return;
     if (tool === 'ping' && !target) return;
     if (tool === 'traceroute' && !target) return;
@@ -105,10 +147,10 @@ export default function NetworkToolsPage() {
     else arpMut.mutate();
   };
 
-  // Dynamic disable logic
   const isDisabled = (() => {
     if (isRunning) return true;
     if (tool === 'mac') return !bridge;
+    if (tool === 'capture') return false;
     if (tool === 'arp') return !source;
     return !source || !target;
   })();
@@ -125,9 +167,9 @@ export default function NetworkToolsPage() {
     <div>
       {/* Header */}
       <div style={{ marginBottom: 20 }}>
-        <h2 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 4px' }}>🏓 Network Tools</h2>
+        <h2 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 4px' }}>🛠️ Network Tools</h2>
         <p style={{ color: 'var(--color-text-muted)', margin: 0, fontSize: 13 }}>
-          Ping, Traceroute, ARP &amp; MAC table — test connectivity from any host
+          Ping, Traceroute, ARP, MAC table &amp; Packet Capture
         </p>
       </div>
 
@@ -142,17 +184,17 @@ export default function NetworkToolsPage() {
           {/* Tool selector */}
           <div>
             <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 6, display: 'block' }}>TOOL</label>
-            <div style={{ display: 'flex', gap: 6 }}>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
               {(Object.keys(TOOL_META) as Tool[]).map((t) => {
                 const m = TOOL_META[t];
                 const active = tool === t;
                 return (
                   <button key={t} onClick={() => setTool(t)}
                     style={{
-                      flex: 1, padding: '10px 8px', borderRadius: 10, border: 'none', cursor: 'pointer',
+                      flex: '1 1 60px', padding: '10px 6px', borderRadius: 10, border: 'none', cursor: 'pointer',
                       background: active ? m.color + '20' : 'var(--color-bg)',
                       color: active ? m.color : 'var(--color-text-muted)',
-                      fontWeight: active ? 700 : 500, fontSize: 12,
+                      fontWeight: active ? 700 : 500, fontSize: 11,
                       outline: active ? `2px solid ${m.color}40` : 'none',
                       transition: 'all 0.15s',
                     }}>
@@ -167,10 +209,10 @@ export default function NetworkToolsPage() {
           {tool !== 'mac' && (
             <div>
               <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 6, display: 'block' }}>
-                SOURCE HOST
+                {tool === 'capture' ? 'NAMESPACE (optional)' : 'SOURCE HOST'}
               </label>
               <select value={source} onChange={(e) => setSource(e.target.value)} style={inputStyle}>
-                <option value="">— Select Host —</option>
+                <option value="">{tool === 'capture' ? '— VM Root —' : '— Select Host —'}</option>
                 {hostOptions.map((h) => (
                   <option key={h} value={h}>{h}{hostIPs[h] ? ` (${hostIPs[h]})` : ''}</option>
                 ))}
@@ -199,8 +241,71 @@ export default function NetworkToolsPage() {
             </div>
           )}
 
-          {/* Target (not for ARP) */}
-          {tool !== 'arp' && (
+          {/* Capture-specific fields */}
+          {tool === 'capture' && (
+            <>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 6, display: 'block' }}>
+                  INTERFACE
+                </label>
+                <select value={captureIface} onChange={(e) => setCaptureIface(e.target.value)} style={inputStyle}>
+                  <option value="any">any (all interfaces)</option>
+                  {(ifaceQ.data ?? []).filter(i => i.name !== 'lo').map((iface) => (
+                    <option key={iface.name} value={iface.name}>
+                      {iface.name} ({iface.state}{iface.addresses.length > 0 ? ` — ${iface.addresses[0]}` : ''})
+                    </option>
+                  ))}
+                </select>
+                {ifaceQ.isLoading && (
+                  <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 4 }}>Loading interfaces...</div>
+                )}
+              </div>
+
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 6, display: 'block' }}>
+                  BPF FILTER (optional)
+                </label>
+                <input value={captureFilter} onChange={(e) => setCaptureFilter(e.target.value)}
+                  placeholder='e.g. "icmp", "port 80", "host 10.0.0.1"' style={inputStyle}
+                  onKeyDown={(e) => e.key === 'Enter' && handleRun()} />
+                <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 6 }}>
+                  {['icmp', 'arp', 'tcp', 'udp', 'port 80', 'not arp'].map((f) => (
+                    <button key={f} onClick={() => setCaptureFilter(f)}
+                      style={{
+                        padding: '2px 8px', borderRadius: 6, border: '1px solid var(--color-border)',
+                        fontSize: 10, cursor: 'pointer',
+                        background: captureFilter === f ? '#ef444420' : 'var(--color-bg)',
+                        color: captureFilter === f ? '#ef4444' : 'var(--color-text-muted)',
+                      }}>
+                      {f}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: 12 }}>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 6, display: 'block' }}>
+                    PACKETS
+                  </label>
+                  <input type="number" min={1} max={100} value={captureCount}
+                    onChange={(e) => setCaptureCount(Math.min(100, Math.max(1, Number(e.target.value))))}
+                    style={{ ...inputStyle, width: '100%' }} />
+                </div>
+                <div style={{ flex: 1 }}>
+                  <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 6, display: 'block' }}>
+                    TIMEOUT (s)
+                  </label>
+                  <input type="number" min={1} max={30} value={captureTimeout}
+                    onChange={(e) => setCaptureTimeout(Math.min(30, Math.max(1, Number(e.target.value))))}
+                    style={{ ...inputStyle, width: '100%' }} />
+                </div>
+              </div>
+            </>
+          )}
+
+          {/* Target (ping/traceroute only) */}
+          {(tool === 'ping' || tool === 'traceroute') && (
             <div>
               <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 6, display: 'block' }}>
                 TARGET IP
@@ -208,7 +313,6 @@ export default function NetworkToolsPage() {
               <input value={target} onChange={(e) => setTarget(e.target.value)}
                 placeholder="e.g. 10.0.0.20" style={inputStyle}
                 onKeyDown={(e) => e.key === 'Enter' && handleRun()} />
-              {/* Quick target buttons */}
               {Object.keys(hostIPs).length > 0 && (
                 <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 8 }}>
                   {Object.entries(hostIPs)
@@ -250,9 +354,9 @@ export default function NetworkToolsPage() {
               transition: 'all 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
             }}>
             {isRunning ? (
-              <><span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⏳</span> Running...</>
+              <><span style={{ animation: 'spin 1s linear infinite', display: 'inline-block' }}>⏳</span> {tool === 'capture' ? 'Capturing...' : 'Running...'}</>
             ) : (
-              <>{meta.icon} Run {meta.label}</>
+              <>{meta.icon} {tool === 'capture' ? 'Start Capture' : `Run ${meta.label}`}</>
             )}
           </button>
 
@@ -277,10 +381,11 @@ export default function NetworkToolsPage() {
                       <span style={{ fontSize: 12 }}>{hm.icon}</span>
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--color-text)' }}>
-                          {h.source} → {h.target || '(self)'}
+                          {h.tool === 'capture' ? `${h.source} @ ${h.target}` : `${h.source} → ${h.target || '(self)'}`}
                         </div>
                         <div style={{ fontSize: 9, color: 'var(--color-text-muted)' }}>
                           {h.timestamp.toLocaleTimeString()}
+                          {h.tool === 'capture' && h.packets ? ` · ${h.packets.length} pkts` : ''}
                         </div>
                       </div>
                       <span style={{
@@ -309,12 +414,17 @@ export default function NetworkToolsPage() {
                 <span style={{ fontSize: 24 }}>{TOOL_META[activeResult.tool].icon}</span>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 14, fontWeight: 700 }}>
-                    {TOOL_META[activeResult.tool].label}: {activeResult.tool === 'mac'
-                      ? `Bridge ${activeResult.source}`
-                      : `${activeResult.source} → ${activeResult.target || '(self)'}`}
+                    {activeResult.tool === 'mac'
+                      ? `MAC Table: Bridge ${activeResult.source}`
+                      : activeResult.tool === 'capture'
+                        ? `Capture: ${activeResult.source} @ ${activeResult.target}`
+                        : `${TOOL_META[activeResult.tool].label}: ${activeResult.source} → ${activeResult.target || '(self)'}`}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
                     {activeResult.timestamp.toLocaleString()}
+                    {activeResult.tool === 'capture' && activeResult.packets
+                      ? ` · ${activeResult.packets.length} packets`
+                      : ''}
                   </div>
                 </div>
                 <span style={{
@@ -348,27 +458,111 @@ export default function NetworkToolsPage() {
                 </div>
               )}
 
+              {/* Capture summary cards */}
+              {activeResult.tool === 'capture' && activeResult.summary && (
+                <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap' }}>
+                  {[
+                    { label: 'Captured', value: activeResult.summary.captured ?? activeResult.packets?.length ?? 0, color: '#ef4444' },
+                    { label: 'Received', value: activeResult.summary.received ?? '—', color: '#3b82f6' },
+                    { label: 'Dropped', value: activeResult.summary.dropped ?? 0, color: Number(activeResult.summary.dropped) > 0 ? '#f59e0b' : '#22c55e' },
+                  ].map((s) => (
+                    <div key={s.label} style={{
+                      flex: '1 1 100px', background: 'var(--color-bg-card)', border: '1px solid var(--color-border)',
+                      borderRadius: 10, padding: '12px 14px', textAlign: 'center',
+                    }}>
+                      <div style={{ fontSize: 20, fontWeight: 700, color: s.color }}>{String(s.value ?? '—')}</div>
+                      <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 2 }}>{s.label}</div>
+                    </div>
+                  ))}
+                  {/* Protocol breakdown */}
+                  {activeResult.packets && activeResult.packets.length > 0 && (() => {
+                    const protos: Record<string, number> = {};
+                    activeResult.packets!.forEach(p => { protos[p.protocol] = (protos[p.protocol] || 0) + 1; });
+                    return Object.entries(protos).sort((a, b) => b[1] - a[1]).map(([proto, cnt]) => (
+                      <div key={proto} style={{
+                        flex: '1 1 80px', background: 'var(--color-bg-card)', border: '1px solid var(--color-border)',
+                        borderRadius: 10, padding: '12px 14px', textAlign: 'center',
+                      }}>
+                        <div style={{ fontSize: 20, fontWeight: 700, color: PROTO_COLORS[proto] || '#94a3b8' }}>{cnt}</div>
+                        <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 2 }}>{proto}</div>
+                      </div>
+                    ));
+                  })()}
+                </div>
+              )}
+
+              {/* Capture packet table */}
+              {activeResult.tool === 'capture' && activeResult.packets && activeResult.packets.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text)', marginBottom: 10 }}>
+                    🦈 {activeResult.packets.length} {activeResult.packets.length === 1 ? 'packet' : 'packets'} captured
+                  </div>
+                  <div style={{
+                    border: '1px solid var(--color-border)', borderRadius: 12, overflow: 'hidden',
+                    maxHeight: 420, overflowY: 'auto',
+                  }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                      <thead>
+                        <tr style={{ background: 'var(--color-bg)', position: 'sticky', top: 0, zIndex: 1 }}>
+                          {['#', 'Time', 'Protocol', 'Source', 'Destination', 'Length', 'Info'].map((h) => (
+                            <th key={h} style={{
+                              padding: '8px 10px', textAlign: 'left', fontWeight: 700,
+                              fontSize: 10, color: 'var(--color-text-muted)', textTransform: 'uppercase',
+                              borderBottom: '1px solid var(--color-border)',
+                            }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {activeResult.packets.map((pkt, i) => {
+                          const protoColor = PROTO_COLORS[pkt.protocol] || PROTO_COLORS.other;
+                          return (
+                            <tr key={i} style={{
+                              background: i % 2 === 0 ? 'transparent' : 'var(--color-bg)',
+                              cursor: 'default',
+                            }} title={pkt.raw}>
+                              <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-muted)', fontFamily: 'monospace', fontSize: 10 }}>
+                                {i + 1}
+                              </td>
+                              <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--color-border)', fontFamily: 'monospace', fontSize: 10, color: 'var(--color-text-muted)' }}>
+                                {pkt.timestamp || '—'}
+                              </td>
+                              <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--color-border)' }}>
+                                <span style={{
+                                  padding: '2px 8px', borderRadius: 6, fontSize: 10, fontWeight: 700,
+                                  background: protoColor + '20', color: protoColor,
+                                }}>{pkt.protocol}</span>
+                              </td>
+                              <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--color-border)', fontFamily: 'monospace', fontSize: 10 }}>
+                                {pkt.src_ip || pkt.src_mac || '—'}
+                              </td>
+                              <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--color-border)', fontFamily: 'monospace', fontSize: 10 }}>
+                                {pkt.dst_ip || pkt.dst_mac || '—'}
+                              </td>
+                              <td style={{ padding: '6px 10px', borderBottom: '1px solid var(--color-border)', fontFamily: 'monospace', fontSize: 10, color: 'var(--color-text-muted)' }}>
+                                {pkt.length ?? '—'}
+                              </td>
+                              <td style={{
+                                padding: '6px 10px', borderBottom: '1px solid var(--color-border)',
+                                fontSize: 10, color: 'var(--color-text-muted)',
+                                maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                              }}>
+                                {pkt.info}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
               {/* MAC table entries */}
               {activeResult.tool === 'mac' && activeResult.entries && activeResult.entries.length > 0 && (
                 <div style={{ marginBottom: 16 }}>
-                  <div style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-                    marginBottom: 10,
-                  }}>
-                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text)' }}>
-                      📟 {activeResult.entries.length} MAC {activeResult.entries.length === 1 ? 'entry' : 'entries'}
-                    </span>
-                    <input
-                      type="text"
-                      placeholder="Filter MAC / port..."
-                      id="mac-filter"
-                      onChange={() => {/* filter handled via CSS / state outside for simplicity */}}
-                      style={{
-                        padding: '5px 10px', borderRadius: 8, fontSize: 11,
-                        background: 'var(--color-bg)', border: '1px solid var(--color-border)',
-                        color: 'var(--color-text)', outline: 'none', width: 180,
-                      }}
-                    />
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text)', marginBottom: 10 }}>
+                    📟 {activeResult.entries.length} MAC {activeResult.entries.length === 1 ? 'entry' : 'entries'}
                   </div>
                   <div style={{
                     border: '1px solid var(--color-border)', borderRadius: 12, overflow: 'hidden',
@@ -389,7 +583,6 @@ export default function NetworkToolsPage() {
                         {activeResult.entries.map((entry, i) => (
                           <tr key={i} style={{
                             background: i % 2 === 0 ? 'transparent' : 'var(--color-bg)',
-                            transition: 'background 0.1s',
                           }}>
                             <td style={{ padding: '8px 14px', borderBottom: '1px solid var(--color-border)' }}>
                               <span style={{
@@ -423,7 +616,7 @@ export default function NetworkToolsPage() {
               <div style={{
                 background: '#0d1117', border: '1px solid var(--color-border)', borderRadius: 12,
                 padding: 16, fontFamily: 'monospace', fontSize: 12, lineHeight: 1.7,
-                color: '#e2e8f0', whiteSpace: 'pre-wrap', overflowX: 'auto', maxHeight: 500, overflowY: 'auto',
+                color: '#e2e8f0', whiteSpace: 'pre-wrap', overflowX: 'auto', maxHeight: 400, overflowY: 'auto',
               }}>
                 <div style={{ fontSize: 10, color: '#64748b', marginBottom: 8 }}>RAW OUTPUT</div>
                 {activeResult.output || activeResult.summary?.toString() || 'No output'}
@@ -434,8 +627,8 @@ export default function NetworkToolsPage() {
               display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
               height: 400, color: 'var(--color-text-muted)', textAlign: 'center',
             }}>
-              <div style={{ fontSize: 48, marginBottom: 12 }}>🏓</div>
-              <div style={{ fontSize: 16, fontWeight: 600 }}>Select a tool, source host, and target</div>
+              <div style={{ fontSize: 48, marginBottom: 12 }}>🛠️</div>
+              <div style={{ fontSize: 16, fontWeight: 600 }}>Select a tool and configure parameters</div>
               <div style={{ fontSize: 13, marginTop: 4 }}>Results will appear here</div>
             </div>
           )}

@@ -186,8 +186,27 @@ export const toolMac = (data: { bridge: string }) =>
     total: number;
   }>('/tools/mac', data);
 
+export const toolCapture = (data: { source?: string; interface?: string; filter?: string; count?: number; timeout?: number }) =>
+  client.post<{
+    success: boolean; source: string; interface: string; filter: string;
+    output: string; error: string | null;
+    packets: {
+      raw: string; timestamp?: string; src_mac?: string; dst_mac?: string;
+      ethertype?: string; src_ip?: string; dst_ip?: string;
+      protocol: string; length?: number; info: string;
+    }[];
+    total: number;
+    summary: { captured?: number; received?: number; dropped?: number };
+  }>('/tools/capture', data);
+
 export const toolListHosts = () =>
   client.get<{ hosts: string[] }>('/tools/hosts');
 
 export const toolListBridges = () =>
   client.get<{ bridges: string[] }>('/tools/bridges');
+
+export const toolListInterfaces = (source?: string) =>
+  client.get<{
+    source: string;
+    interfaces: { name: string; state: string; addresses: string[] }[];
+  }>('/tools/interfaces', { params: source ? { source } : {} });

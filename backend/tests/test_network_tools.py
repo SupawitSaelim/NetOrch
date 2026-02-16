@@ -1,4 +1,4 @@
-"""Tests for Network Tools endpoints — ping, traceroute, arp, mac, bridges."""
+"""Tests for Network Tools endpoints — ping, traceroute, arp, mac, capture, interfaces."""
 
 from __future__ import annotations
 
@@ -41,10 +41,30 @@ _MOCK_LIST_BR = "sw1\nsw2\n"
 
 _MOCK_NETNS = "h1 (id: 0)\nh2 (id: 1)\nrouter1 (id: 2)\n"
 
+_MOCK_TCPDUMP = """\
+tcpdump: verbose output suppressed, use -v[v]... for full protocol decode
+listening on eth0, link-type EN10MB (Ethernet), snapshot length 262144 bytes
+12:34:56.789012 aa:bb:cc:dd:ee:01 > ff:ff:ff:ff:ff:ff, ethertype ARP (0x0806), length 42: Request who-has 10.0.0.20 tell 10.0.0.1, length 28
+12:34:56.790000 aa:bb:cc:dd:ee:02 > aa:bb:cc:dd:ee:01, ethertype IPv4 (0x0800), length 98: 10.0.0.20 > 10.0.0.1: ICMP echo reply, id 1, seq 1, length 64
+12:34:56.791000 aa:bb:cc:dd:ee:01 > aa:bb:cc:dd:ee:02, ethertype IPv4 (0x0800), length 74: 10.0.0.1.12345 > 10.0.0.20.80: Flags [S], seq 0, win 29200, length 0
+3 packets captured
+3 packets received by filter
+0 packets dropped by kernel
+"""
+
+_MOCK_IFACE = """\
+lo               UNKNOWN        127.0.0.1/8 ::1/128
+eth0             UP             10.0.0.1/24 fe80::1/64
+ovs-system       DOWN
+sw1              UNKNOWN        192.168.1.1/24
+"""
+
 
 async def _mock_ssh(command: str, timeout: int = 15) -> CmdResult:
     """Return canned output for network tool commands."""
     cmd = command.strip()
+    if "tcpdump" in cmd:
+        return CmdResult(_MOCK_TCPDUMP.strip(), "", 0)
     if "ping" in cmd:
         return CmdResult(_MOCK_PING.strip(), "", 0)
     if "traceroute" in cmd:
@@ -55,6 +75,8 @@ async def _mock_ssh(command: str, timeout: int = 15) -> CmdResult:
         return CmdResult(_MOCK_FDB.strip(), "", 0)
     if "ovs-vsctl list-br" in cmd:
         return CmdResult(_MOCK_LIST_BR.strip(), "", 0)
+    if "ip -br addr" in cmd:
+        return CmdResult(_MOCK_IFACE.strip(), "", 0)
     if "ip netns list" in cmd:
         return CmdResult(_MOCK_NETNS.strip(), "", 0)
     return CmdResult("", "unknown command", 1)
@@ -169,3 +191,133 @@ async def test_ping_invalid_target(client):
         "target": "10.0.0.1; rm -rf /",
     })
     assert r.status_code == 400
+
+
+# ── Capture tests ─────────────────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_capture_basic(client):
+    """Basic capture returns parsed packets."""
+    with patch("app.api.v1.network_tools.ssh_exec", side_effect=_mock_ssh):
+        r = await client.post("/api/v1/tools/capture", json={
+            "source": "",
+            "interface": "eth0",
+            "count": 3,
+            "timeout": 10,
+        })
+    assert r.status_code == 200
+    data = r.json()
+    assert data["success"] is True
+    assert data["interface"] == "eth0"
+    assert data["total"] == 3
+    assert len(data["packets"]) == 3
+    # First packet should be ARP
+    pkt0 = data["packets"][0]
+    assert pkt0["protocol"] == "ARP"
+    assert pkt0["src_mac"] == "aa:bb:cc:dd:ee:01"
+    assert pkt0["dst_mac"] == "ff:ff:ff:ff:ff:ff"
+    assert pkt0["timestamp"] == "12:34:56.789012"
+    # Second packet should be ICMP
+    pkt1 = data["packets"][1]
+    assert pkt1["protocol"] == "ICMP"
+    assert pkt1["src_ip"] == "10.0.0.20"
+    assert pkt1["dst_ip"] == "10.0.0.1"
+    # Third packet should be TCP
+    pkt2 = data["packets"][2]
+    assert pkt2["protocol"] == "TCP"
+
+
+@pytest.mark.anyio
+async def test_capture_summary(client):
+    """Capture returns summary statistics."""
+    with patch("app.api.v1.network_tools.ssh_exec", side_effect=_mock_ssh):
+        r = await client.post("/api/v1/tools/capture", json={})
+    assert r.status_code == 200
+    data = r.json()
+    assert data["summary"]["captured"] == 3
+    assert data["summary"]["received"] == 3
+    assert data["summary"]["dropped"] == 0
+
+
+@pytest.mark.anyio
+async def test_capture_with_netns(client):
+    """Capture in a netns wraps with ip netns exec."""
+    calls = []
+    async def _spy_ssh(command: str, timeout: int = 15) -> CmdResult:
+        calls.append(command)
+        return await _mock_ssh(command, timeout)
+
+    with patch("app.api.v1.network_tools.ssh_exec", side_effect=_spy_ssh):
+        r = await client.post("/api/v1/tools/capture", json={
+            "source": "h1",
+            "interface": "eth0",
+        })
+    assert r.status_code == 200
+    assert any("ip netns exec h1" in c and "tcpdump" in c for c in calls)
+
+
+@pytest.mark.anyio
+async def test_capture_with_filter(client):
+    """Capture with BPF filter passes it to tcpdump."""
+    calls = []
+    async def _spy_ssh(command: str, timeout: int = 15) -> CmdResult:
+        calls.append(command)
+        return await _mock_ssh(command, timeout)
+
+    with patch("app.api.v1.network_tools.ssh_exec", side_effect=_spy_ssh):
+        r = await client.post("/api/v1/tools/capture", json={
+            "filter": "icmp",
+        })
+    assert r.status_code == 200
+    assert any("icmp" in c for c in calls)
+    assert r.json()["filter"] == "icmp"
+
+
+@pytest.mark.anyio
+async def test_capture_invalid_filter(client):
+    """BPF filter with shell metacharacters should be rejected."""
+    r = await client.post("/api/v1/tools/capture", json={
+        "filter": "icmp; cat /etc/passwd",
+    })
+    assert r.status_code == 400
+
+
+@pytest.mark.anyio
+async def test_capture_invalid_source(client):
+    """Source with injection should be rejected."""
+    r = await client.post("/api/v1/tools/capture", json={
+        "source": "h1; rm -rf /",
+    })
+    assert r.status_code == 400
+
+
+# ── Interfaces tests ──────────────────────────────────────────────
+
+@pytest.mark.anyio
+async def test_list_interfaces(client):
+    """List interfaces returns parsed interface list."""
+    with patch("app.api.v1.network_tools.ssh_exec", side_effect=_mock_ssh):
+        r = await client.get("/api/v1/tools/interfaces")
+    assert r.status_code == 200
+    data = r.json()
+    ifaces = data["interfaces"]
+    assert len(ifaces) == 4
+    # Check eth0
+    eth0 = next(i for i in ifaces if i["name"] == "eth0")
+    assert eth0["state"] == "UP"
+    assert "10.0.0.1/24" in eth0["addresses"]
+
+
+@pytest.mark.anyio
+async def test_list_interfaces_with_netns(client):
+    """List interfaces in a netns wraps with ip netns exec."""
+    calls = []
+    async def _spy_ssh(command: str, timeout: int = 15) -> CmdResult:
+        calls.append(command)
+        return await _mock_ssh(command, timeout)
+
+    with patch("app.api.v1.network_tools.ssh_exec", side_effect=_spy_ssh):
+        r = await client.get("/api/v1/tools/interfaces?source=h1")
+    assert r.status_code == 200
+    assert any("ip netns exec h1" in c for c in calls)
+
