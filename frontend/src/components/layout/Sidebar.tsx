@@ -9,6 +9,7 @@ const navItems = [
   { path: '/flows', label: 'SDN Flows', icon: '📡' },
   { path: '/monitoring', label: 'Monitoring', icon: '📈' },
   { path: '/terminal', label: 'Terminal', icon: '💻' },
+  { path: '/learn', label: 'Learn', icon: '📚' },
 ];
 
 export default function Sidebar() {

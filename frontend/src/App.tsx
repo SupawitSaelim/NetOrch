@@ -9,6 +9,7 @@ const FlowsPage = lazy(() => import('./features/flows/FlowsPage'));
 const MonitoringPage = lazy(() => import('./features/monitoring/MonitoringPage'));
 const TerminalPage = lazy(() => import('./features/terminal/TerminalPage'));
 const RoutersPage = lazy(() => import('./features/routers/RoutersPage'));
+const LearnPage = lazy(() => import('./features/learn/LearnPage'));
 
 function Loading() {
   return (
@@ -75,6 +76,14 @@ export default function App() {
           element={
             <Suspense fallback={<Loading />}>
               <RoutersPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="learn"
+          element={
+            <Suspense fallback={<Loading />}>
+              <LearnPage />
             </Suspense>
           }
         />
