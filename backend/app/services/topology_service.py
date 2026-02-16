@@ -11,8 +11,6 @@ import re
 from datetime import datetime, timezone
 from typing import Any
 
-from app.core.config import settings
-
 logger = logging.getLogger(__name__)
 
 
@@ -112,18 +110,16 @@ class TopologyService:
             # ---- 1) FRR router node ----
             bgp_r = await vtysh_exec("show ip bgp summary")
             router_id = ""
-            local_as = ""
             if bgp_r.returncode == 0:
                 m = re.search(r'BGP router identifier (\S+), local AS number (\d+)',
                               bgp_r.stdout)
                 if m:
                     router_id = m.group(1)
-                    local_as = m.group(2)
 
             hostname_r = await ssh_exec("hostname -s")
             rname = hostname_r.stdout.strip()
             if not rname or rname == "localhost":
-                rname = f"frr-router"
+                rname = "frr-router"
             if router_id:
                 rname += f" ({router_id})"
             _add_node("router-001", "router", rname)
@@ -277,7 +273,7 @@ class TopologyService:
                     m = re.match(r'^([CS])([>*\s]{0,3})\s*(\d+\.\d+\.\d+\.\d+/\d+)', line.strip())
                     if not m:
                         continue
-                    proto_char, _, dest = m.groups()
+                    _, _, dest = m.groups()
                     if dest in seen_nets or dest == "0.0.0.0/0":
                         continue
                     seen_nets.add(dest)
@@ -335,10 +331,6 @@ class TopologyService:
                             meta["ip"] = host_ip
                         if host_gw:
                             meta["gateway"] = host_gw
-                        # Check if veth exists on host side
-                        vstate_r = await ssh_exec(
-                            f"cat /sys/class/net/{veth_host}/operstate 2>/dev/null || echo down")
-                        vstatus = "up" if vstate_r.stdout.strip() in ("up", "unknown") else "down"
                         _add_node(host_id, "host", veth_host)
                         # Store IP + gateway in metadata
                         for n in nodes:

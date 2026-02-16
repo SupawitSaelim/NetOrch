@@ -5,7 +5,6 @@ from __future__ import annotations
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from app.core.config import settings
 from app.core.security import verify_token
 from app.services.orchestrator import orchestrator
 
