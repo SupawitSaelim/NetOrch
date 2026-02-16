@@ -1,25 +1,23 @@
-import { useEffect, useRef, useState } from 'react';
-import { useParams, useSearchParams, Link } from 'react-router-dom';
+import { useEffect, useRef, useState, useCallback } from 'react';
+import { useParams } from 'react-router-dom';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
 
-type Shell = 'vtysh' | 'bash';
-
 export default function RouterTerminalPage() {
   const { routerName } = useParams<{ routerName: string }>();
-  const [searchParams] = useSearchParams();
-  const initialShell = (searchParams.get('shell') === 'bash' ? 'bash' : 'vtysh') as Shell;
   const termRef = useRef<HTMLDivElement>(null);
   const termInstance = useRef<Terminal | null>(null);
   const wsRef = useRef<WebSocket | null>(null);
   const fitAddon = useRef<FitAddon | null>(null);
-  const [shell, setShell] = useState<Shell>(initialShell);
   const [connected, setConnected] = useState(false);
+  const [disconnected, setDisconnected] = useState(false);
 
-  const connect = (selectedShell: Shell) => {
+  const connect = useCallback(() => {
     if (!routerName) return;
+
+    setDisconnected(false);
 
     // Cleanup previous
     if (wsRef.current) wsRef.current.close();
@@ -58,20 +56,18 @@ export default function RouterTerminalPage() {
     }
 
     termInstance.current = term;
-    term.writeln(`\x1b[1;32m● Connecting to ${routerName} (${selectedShell})...\x1b[0m\r\n`);
 
-    // Open WebSocket with netns param
+    // Open WebSocket with netns param — always vtysh
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const host = window.location.hostname;
     const port = window.location.port;
-    const url = `${protocol}://${host}:${port}/api/v1/ws/terminal?shell=${selectedShell}&netns=${routerName}`;
+    const url = `${protocol}://${host}:${port}/api/v1/ws/terminal?shell=vtysh&netns=${routerName}`;
 
     const ws = new WebSocket(url);
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = () => {
       setConnected(true);
-      term.writeln(`\x1b[1;32m● Connected to ${routerName}!\x1b[0m\r\n`);
       term.focus();
     };
 
@@ -85,11 +81,14 @@ export default function RouterTerminalPage() {
 
     ws.onclose = () => {
       setConnected(false);
-      term.writeln(`\r\n\x1b[1;31m● Disconnected from ${routerName}\x1b[0m`);
+      setDisconnected(true);
+      term.dispose();
+      termInstance.current = null;
     };
 
     ws.onerror = () => {
-      term.writeln(`\r\n\x1b[1;31m● Connection error\x1b[0m`);
+      setConnected(false);
+      setDisconnected(true);
     };
 
     wsRef.current = ws;
@@ -108,96 +107,80 @@ export default function RouterTerminalPage() {
         ws.send(buf);
       }
     });
-  };
+  }, [routerName]);
 
   useEffect(() => {
-    connect(shell);
+    connect();
 
     const handleResize = () => fitAddon.current?.fit();
     window.addEventListener('resize', handleResize);
+
+    // Set page title
+    if (routerName) document.title = `${routerName} — CLI`;
 
     return () => {
       window.removeEventListener('resize', handleResize);
       wsRef.current?.close();
       termInstance.current?.dispose();
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routerName]);
-
-  const handleShellChange = (newShell: Shell) => {
-    setShell(newShell);
-    connect(newShell);
-  };
+  }, [routerName, connect]);
 
   if (!routerName) {
-    return <div style={{ padding: 40, color: 'var(--color-text-muted)' }}>No router specified.</div>;
+    return (
+      <div style={{ width: '100vw', height: '100vh', background: '#0f172a', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#64748b' }}>
+        No router specified.
+      </div>
+    );
+  }
+
+  // Disconnected: clean empty page with reconnect option
+  if (disconnected) {
+    return (
+      <div style={{
+        width: '100vw', height: '100vh', background: '#0f172a',
+        display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16,
+      }}>
+        <div style={{ color: '#64748b', fontSize: 14 }}>
+          Connection to <span style={{ color: '#e2e8f0', fontWeight: 600 }}>{routerName}</span> closed.
+        </div>
+        <button
+          onClick={connect}
+          style={{
+            padding: '8px 24px', borderRadius: 8, border: '1px solid rgba(34,197,94,0.3)',
+            background: 'rgba(34,197,94,0.1)', color: '#22c55e', fontSize: 13,
+            fontWeight: 600, cursor: 'pointer',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.2)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'rgba(34,197,94,0.1)'; }}
+        >
+          Reconnect
+        </button>
+      </div>
+    );
   }
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 120px)' }}>
-      {/* Toolbar */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
-        <Link to="/topology" style={{ color: 'var(--color-text-muted)', textDecoration: 'none', fontSize: 13, display: 'flex', alignItems: 'center', gap: 4 }}>
-          ← Topology
-        </Link>
-        <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 18 }}>🔀</span>
-          {routerName}
-          <span style={{ fontSize: 12, fontWeight: 500, color: 'var(--color-text-muted)', background: 'rgba(34,197,94,0.1)', border: '1px solid rgba(34,197,94,0.2)', padding: '2px 8px', borderRadius: 6 }}>
-            VRouter CLI
-          </span>
-        </h2>
-        <div style={{ display: 'flex', gap: 4, marginLeft: 16 }}>
-          {(['vtysh', 'bash'] as Shell[]).map((s) => (
-            <button
-              key={s}
-              onClick={() => handleShellChange(s)}
-              style={{
-                padding: '6px 16px',
-                borderRadius: 6,
-                border: '1px solid var(--color-border)',
-                background: shell === s ? '#22c55e' : 'var(--color-bg-card)',
-                color: shell === s ? '#fff' : 'var(--color-text)',
-                fontWeight: 600,
-                fontSize: 13,
-                cursor: 'pointer',
-                textTransform: 'uppercase',
-              }}
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: connected ? '#22c55e' : 'var(--color-danger)', display: 'inline-block' }} />
-          <span style={{ color: 'var(--color-text-muted)' }}>{connected ? 'Connected' : 'Disconnected'}</span>
-          <button
-            onClick={() => connect(shell)}
-            style={{ marginLeft: 8, padding: '4px 12px', borderRadius: 6, border: '1px solid var(--color-border)', background: 'var(--color-bg-card)', color: 'var(--color-text)', fontSize: 12, cursor: 'pointer' }}
-          >
-            Reconnect
-          </button>
-        </div>
+    <div style={{ width: '100vw', height: '100vh', background: '#0f172a', overflow: 'hidden' }}>
+      {/* Minimal top bar — just router name + status dot */}
+      <div style={{
+        height: 32, display: 'flex', alignItems: 'center', padding: '0 12px',
+        background: '#0f172a', borderBottom: '1px solid rgba(34,197,94,0.15)',
+        fontSize: 12, color: '#64748b', gap: 8, userSelect: 'none',
+      }}>
+        <span style={{
+          width: 7, height: 7, borderRadius: '50%',
+          background: connected ? '#22c55e' : '#ef4444',
+          boxShadow: connected ? '0 0 6px rgba(34,197,94,0.5)' : 'none',
+        }} />
+        <span style={{ color: '#94a3b8', fontWeight: 600 }}>{routerName}</span>
+        <span style={{ color: '#475569' }}>vtysh</span>
       </div>
 
-      {/* Terminal */}
+      {/* Terminal fills remaining space */}
       <div
         ref={termRef}
-        style={{
-          flex: 1,
-          borderRadius: 12,
-          overflow: 'hidden',
-          border: '1px solid rgba(34,197,94,0.3)',
-          background: '#0f172a',
-        }}
+        style={{ width: '100%', height: 'calc(100vh - 32px)', overflow: 'hidden' }}
       />
-
-      {/* Help bar */}
-      <div style={{ marginTop: 8, fontSize: 12, color: 'var(--color-text-muted)', display: 'flex', gap: 16 }}>
-        <span>💡 <b>vtysh</b>: <code>show ip route</code>, <code>show ip bgp summary</code>, <code>conf t</code></span>
-        <span>💡 <b>bash</b>: <code>ip addr</code>, <code>ping</code>, <code>ip route</code></span>
-        <span>📍 Running inside namespace: <code>{routerName}</code></span>
-      </div>
     </div>
   );
 }

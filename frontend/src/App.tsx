@@ -27,6 +27,16 @@ function Loading() {
 export default function App() {
   return (
     <Routes>
+      {/* Fullscreen router terminal — no Layout/sidebar */}
+      <Route
+        path="terminal/router/:routerName"
+        element={
+          <Suspense fallback={<Loading />}>
+            <RouterTerminalPage />
+          </Suspense>
+        }
+      />
+
       <Route element={<Layout />}>
         <Route
           index
@@ -81,14 +91,6 @@ export default function App() {
           element={
             <Suspense fallback={<Loading />}>
               <TerminalPage />
-            </Suspense>
-          }
-        />
-        <Route
-          path="terminal/router/:routerName"
-          element={
-            <Suspense fallback={<Loading />}>
-              <RouterTerminalPage />
             </Suspense>
           }
         />

@@ -907,23 +907,6 @@ export default function TopologyPage() {
                   Open CLI Terminal
                   <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--color-text-muted)' }}>↗ new tab</span>
                 </button>
-                <button
-                  onClick={() => {
-                    window.open(`/terminal/router/${contextMenu.node.name}?shell=bash`, '_blank');
-                    setContextMenu(null);
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(59,130,246,0.15)'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px',
-                    border: 'none', background: 'transparent', color: 'var(--color-text)', fontSize: 13,
-                    cursor: 'pointer', borderRadius: 6, textAlign: 'left',
-                  }}
-                >
-                  <span style={{ fontSize: 16 }}>🐚</span>
-                  Open Bash Shell
-                  <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--color-text-muted)' }}>↗ new tab</span>
-                </button>
               </div>
             </>
           )}
