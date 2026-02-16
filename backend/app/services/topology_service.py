@@ -134,6 +134,8 @@ class TopologyService:
             if br_r.returncode == 0:
                 bridge_names = [b.strip() for b in br_r.stdout.splitlines() if b.strip()]
 
+            patch_links_seen: set[tuple[str, str]] = set()  # track patch links to avoid duplicates
+
             for idx, br_name in enumerate(bridge_names):
                 dpid_r = await ovs_exec(f"ovs-vsctl get bridge {br_name} datapath_id")
                 dpid = dpid_r.stdout.strip().replace('"', '') if dpid_r.returncode == 0 else ""
@@ -176,6 +178,32 @@ class TopologyService:
                                       f"remote ({remote_ip or port_name})")
                             _add_link(sw_id, remote_id, port_name, ptype,
                                       bw=10000, status=pstatus)
+                        elif ptype == "patch":
+                            # Patch port → switch-to-switch link
+                            # Find the peer patch port to determine target bridge
+                            peer_r = await ovs_exec(
+                                f"ovs-vsctl get interface {port_name} options:peer")
+                            peer_name = peer_r.stdout.strip().replace('"', '') if peer_r.returncode == 0 else ""
+                            if peer_name:
+                                # Find which bridge owns the peer port
+                                peer_br_r = await ovs_exec(
+                                    f"ovs-vsctl port-to-br {peer_name}")
+                                peer_br = peer_br_r.stdout.strip() if peer_br_r.returncode == 0 else ""
+                                if peer_br and peer_br != br_name:
+                                    # Find the peer bridge's node ID
+                                    peer_sw_id = ""
+                                    for n in nodes:
+                                        if n["type"] == "switch" and n["name"] == peer_br:
+                                            peer_sw_id = n["id"]
+                                            break
+                                    if peer_sw_id:
+                                        # Avoid duplicate link (only add from lower ID)
+                                        link_key = tuple(sorted([sw_id, peer_sw_id]))
+                                        if link_key not in patch_links_seen:
+                                            patch_links_seen.add(link_key)
+                                            _add_link(sw_id, peer_sw_id,
+                                                      port_name, peer_name,
+                                                      bw=10000, status=pstatus)
                         else:
                             # Regular port → host node
                             host_id = f"host-{port_name}"
