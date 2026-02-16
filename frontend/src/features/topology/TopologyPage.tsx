@@ -115,6 +115,7 @@ export default function TopologyPage() {
   useEffect(() => { modeRef.current = mode; }, [mode]);
   const linkSourceRef = useRef<SimNode | null>(linkSource);
   useEffect(() => { linkSourceRef.current = linkSource; }, [linkSource]);
+  const didAutoLayout = useRef(false);
 
   // ── Form state ──
   const [switchForm, setSwitchForm] = useState<CreateSwitchForm>({ name: '', protocols: 'OpenFlow13', controller: '', connectController: false });
@@ -742,6 +743,14 @@ export default function TopologyPage() {
 
     flash('Layout adjusted');
   }, [nodes, dimensions.width, qc, flash]);
+
+  // ── Auto-layout on initial data load ──
+  useEffect(() => {
+    if (!didAutoLayout.current && nodes.length > 0) {
+      didAutoLayout.current = true;
+      handleAutoLayout();
+    }
+  }, [nodes, handleAutoLayout]);
 
   /* ═══════════ RENDER ═══════════ */
   const isAnyMutating = createSwitchMut.isPending || deleteSwitchMut.isPending
