@@ -11,6 +11,8 @@ const MonitoringPage = lazy(() => import('./features/monitoring/MonitoringPage')
 const TerminalPage = lazy(() => import('./features/terminal/TerminalPage'));
 const RoutersPage = lazy(() => import('./features/routers/RoutersPage'));
 const LearnPage = lazy(() => import('./features/learn/LearnPage'));
+const LabsPage = lazy(() => import('./features/labs/LabsPage'));
+const LabDetailPage = lazy(() => import('./features/labs/LabDetailPage'));
 
 function Loading() {
   return (
@@ -93,6 +95,22 @@ export default function App() {
           element={
             <Suspense fallback={<Loading />}>
               <LearnPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="labs"
+          element={
+            <Suspense fallback={<Loading />}>
+              <LabsPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="labs/:labId"
+          element={
+            <Suspense fallback={<Loading />}>
+              <LabDetailPage />
             </Suspense>
           }
         />
