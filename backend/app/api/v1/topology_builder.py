@@ -239,6 +239,11 @@ async def create_host(
     # Bring up loopback in namespace
     await ssh_exec(f"ip netns exec {name} ip link set lo up")
 
+    # Explicitly disable IP forwarding (hosts must NOT forward)
+    # RHEL inherits ip_forward=1 from the host — this prevents
+    # the discovery pre-scan from classifying hosts as routers.
+    await ssh_exec(f"ip netns exec {name} sysctl -w net.ipv4.ip_forward=0")
+
     # Create veth pair: {name}-eth0 (in namespace) ↔ {name}-veth (host side)
     veth_host = f"{name}-veth"
     veth_ns = f"{name}-eth0"

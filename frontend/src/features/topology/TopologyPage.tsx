@@ -744,12 +744,28 @@ export default function TopologyPage() {
   }, [nodes, dimensions.width, qc, flash]);
 
   /* ═══════════ RENDER ═══════════ */
+  const isAnyMutating = createSwitchMut.isPending || deleteSwitchMut.isPending
+    || createHostMut.isPending || deleteHostMut.isPending
+    || createRouterMut.isPending || deleteRouterMut.isPending
+    || createLinkMut.isPending || deleteLinkMut.isPending
+    || clearAllMut.isPending || refreshMut.isPending;
+
   return (
     <div>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
         <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>🌐 Network Topology Builder</h2>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          {/* Loading spinner */}
+          {isAnyMutating && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '4px 12px', borderRadius: 8, background: 'rgba(59,130,246,0.1)', border: '1px solid rgba(59,130,246,0.2)' }}>
+              <svg width="16" height="16" viewBox="0 0 24 24" style={{ animation: 'spin 1s linear infinite' }}>
+                <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+                <circle cx="12" cy="12" r="10" stroke="#3b82f6" strokeWidth="3" fill="none" strokeDasharray="31.4 31.4" strokeLinecap="round" />
+              </svg>
+              <span style={{ fontSize: 11, color: '#3b82f6', fontWeight: 600 }}>Working…</span>
+            </div>
+          )}
           <button onClick={handleAutoLayout} title="Auto-arrange nodes by type layer"
             style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, cursor: 'pointer', background: 'linear-gradient(135deg, #3b82f622, #a78bfa22)', border: '1px solid rgba(139,92,246,0.3)', color: '#a78bfa', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
             🏗️ Auto Layout
