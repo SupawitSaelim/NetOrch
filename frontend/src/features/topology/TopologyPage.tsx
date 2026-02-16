@@ -98,6 +98,7 @@ export default function TopologyPage() {
   const [showLinkIpDialog, setShowLinkIpDialog] = useState(false);
   const [pendingLinkData, setPendingLinkData] = useState<{ source_id: string; target_id: string; source_name: string; target_name: string } | null>(null);
   const [linkIp, setLinkIp] = useState('');
+  const [linkTargetIp, setLinkTargetIp] = useState('');
   const [pendingPosition, setPendingPosition] = useState<{ x: number; y: number } | null>(null);
   const [toast, setToast] = useState<{ msg: string; type: 'ok' | 'err' } | null>(null);
 
@@ -281,7 +282,7 @@ export default function TopologyPage() {
   });
 
   const createLinkMut = useMutation({
-    mutationFn: (data: { source_id: string; target_id: string; source_name: string; target_name: string; ip?: string }) =>
+    mutationFn: (data: { source_id: string; target_id: string; source_name: string; target_name: string; ip?: string; target_ip?: string }) =>
       createLink(data),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['topology'] });
@@ -363,11 +364,16 @@ export default function TopologyPage() {
 
   const handleCreateRouterLink = () => {
     if (!pendingLinkData) return;
-    createLinkMut.mutate({ ...pendingLinkData, ip: linkIp || undefined });
+    createLinkMut.mutate({ ...pendingLinkData, ip: linkIp || undefined, target_ip: linkTargetIp || undefined });
     setShowLinkIpDialog(false);
     setPendingLinkData(null);
     setLinkIp('');
+    setLinkTargetIp('');
   };
+
+  const isRouterToRouter = pendingLinkData
+    ? pendingLinkData.source_id.startsWith('vrouter-') && pendingLinkData.target_id.startsWith('vrouter-')
+    : false;
 
   // ── Resize ──
   useEffect(() => {
@@ -586,7 +592,7 @@ export default function TopologyPage() {
           const srcIsSwitch = ls.id.startsWith('switch-');
           const tgtIsSwitch = d.id.startsWith('switch-');
 
-          if ((srcIsRouter && tgtIsSwitch) || (srcIsSwitch && tgtIsRouter)) {
+          if ((srcIsRouter && tgtIsSwitch) || (srcIsSwitch && tgtIsRouter) || (srcIsRouter && tgtIsRouter)) {
             setPendingLinkData({ source_id: ls.id, target_id: d.id, source_name: ls.name, target_name: d.name });
             setShowLinkIpDialog(true);
           } else {
@@ -1123,27 +1129,37 @@ export default function TopologyPage() {
 
       {/* Router Link IP Dialog */}
       {showLinkIpDialog && pendingLinkData && (
-        <DialogOverlay onClose={() => { setShowLinkIpDialog(false); setPendingLinkData(null); setLinkIp(''); setLinkSource(null); }}>
+        <DialogOverlay onClose={() => { setShowLinkIpDialog(false); setPendingLinkData(null); setLinkIp(''); setLinkTargetIp(''); setLinkSource(null); }}>
           <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>
-            <span style={{ color: '#22c55e' }}>🔗</span> Router Interface Configuration
+            <span style={{ color: '#22c55e' }}>🔗</span> {isRouterToRouter ? 'Router-to-Router Link' : 'Router Interface Configuration'}
           </h3>
           <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 16, lineHeight: 1.6 }}>
             Linking <strong style={{ color: '#22c55e' }}>{pendingLinkData.source_name}</strong> ↔ <strong style={{ color: '#3b82f6' }}>{pendingLinkData.target_name}</strong><br />
-            A new veth interface will be created on the router. Assign its IP below.
+            {isRouterToRouter
+              ? 'A direct veth pair will be created between the two routers. Assign IPs for each side.'
+              : 'A new veth interface will be created on the router. Assign its IP below.'}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            <FieldLabel label="Router Interface IP (CIDR)">
+            <FieldLabel label={isRouterToRouter ? `${pendingLinkData.source_name} IP (CIDR)` : 'Router Interface IP (CIDR)'}>
               <input autoFocus value={linkIp}
                 onChange={(e) => setLinkIp(e.target.value)}
-                placeholder="e.g. 10.0.0.1/24" style={inputStyle}
-                onKeyDown={(e) => e.key === 'Enter' && handleCreateRouterLink()} />
+                placeholder={isRouterToRouter ? 'e.g. 172.16.0.1/30' : 'e.g. 10.0.0.1/24'} style={inputStyle}
+                onKeyDown={(e) => e.key === 'Enter' && (!isRouterToRouter ? handleCreateRouterLink() : undefined)} />
             </FieldLabel>
+            {isRouterToRouter && (
+              <FieldLabel label={`${pendingLinkData.target_name} IP (CIDR)`}>
+                <input value={linkTargetIp}
+                  onChange={(e) => setLinkTargetIp(e.target.value)}
+                  placeholder="e.g. 172.16.0.2/30" style={inputStyle}
+                  onKeyDown={(e) => e.key === 'Enter' && handleCreateRouterLink()} />
+              </FieldLabel>
+            )}
             <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
-              Leave empty to create the link without an IP (can be configured later via CLI)
+              Leave empty to create the link without IPs (can be configured later via CLI)
             </div>
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 20, justifyContent: 'flex-end' }}>
-            <button onClick={() => { setShowLinkIpDialog(false); setPendingLinkData(null); setLinkIp(''); setLinkSource(null); }} style={cancelBtnStyle}>Cancel</button>
+            <button onClick={() => { setShowLinkIpDialog(false); setPendingLinkData(null); setLinkIp(''); setLinkTargetIp(''); setLinkSource(null); }} style={cancelBtnStyle}>Cancel</button>
             <button onClick={handleCreateRouterLink}
               disabled={createLinkMut.isPending}
               style={{ ...primaryBtnStyle, background: '#22c55e' }}>

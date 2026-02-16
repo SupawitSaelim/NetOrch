@@ -139,6 +139,7 @@ export const createLink = (data: {
   source_name: string;
   target_name: string;
   ip?: string;
+  target_ip?: string;
 }) =>
   client.post<{ success: boolean; message: string; link_type: string }>(
     '/topology/builder/links',
