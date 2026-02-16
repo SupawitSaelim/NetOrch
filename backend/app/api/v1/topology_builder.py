@@ -14,23 +14,13 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
-from app.api.deps import get_current_user, get_orchestrator
+from app.api.deps import get_orchestrator
 from app.services.orchestrator import Orchestrator
 from app.services.ssh_utils import ssh_exec, ovs_exec
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/topology/builder", tags=["Topology Builder"])
-
-# ── Protected (default) devices — cannot be deleted ─────────────
-PROTECTED_SWITCHES: set[str] = {"br0", "br1"}
-PROTECTED_NODE_IDS: set[str] = {"router-001"}  # FRR router
-
-def _is_protected_switch(name: str) -> bool:
-    return name in PROTECTED_SWITCHES
-
-def _is_protected_node(node_id: str) -> bool:
-    return node_id in PROTECTED_NODE_IDS or node_id.startswith("router-")
 
 
 # ── Schemas ──────────────────────────────────────────────────────
@@ -97,7 +87,6 @@ async def _host_exists(name: str) -> bool:
 @router.post("/switches", status_code=status.HTTP_201_CREATED)
 async def create_switch(
     req: CreateSwitchRequest,
-    _user: str = Depends(get_current_user),
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Create a new OVS bridge (switch) on the VM."""
@@ -144,16 +133,8 @@ async def create_switch(
 @router.delete("/switches/{name}")
 async def delete_switch(
     name: str,
-    _user: str = Depends(get_current_user),
 ):
     """Delete an OVS bridge (switch) from the VM."""
-    # Protected device guard
-    if _is_protected_switch(name):
-        raise HTTPException(
-            403,
-            detail=f"Bridge '{name}' is a protected default device and cannot be deleted",
-        )
-
     # Check exists
     r = await ovs_exec(f"ovs-vsctl br-exists {name}")
     if r.returncode != 0:
@@ -173,7 +154,6 @@ async def delete_switch(
 @router.post("/hosts", status_code=status.HTTP_201_CREATED)
 async def create_host(
     req: CreateHostRequest,
-    _user: str = Depends(get_current_user),
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Create a virtual host (network namespace + veth pair).
@@ -242,7 +222,6 @@ async def create_host(
 @router.delete("/hosts/{name}")
 async def delete_host(
     name: str,
-    _user: str = Depends(get_current_user),
 ):
     """Delete a virtual host (namespace + veth pair)."""
     # Deleting the namespace also removes the veth peer inside it
@@ -264,7 +243,6 @@ async def delete_host(
 @router.post("/links", status_code=status.HTTP_201_CREATED)
 async def create_link(
     req: CreateLinkRequest,
-    _user: str = Depends(get_current_user),
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Create a link between two nodes.
@@ -354,7 +332,6 @@ async def create_link(
 async def delete_link(
     source_name: str,
     target_name: str,
-    _user: str = Depends(get_current_user),
 ):
     """Delete a link between two nodes by removing the port(s)."""
     # Try to find which bridge has the port
@@ -395,7 +372,6 @@ async def delete_link(
 @router.put("/positions")
 async def update_positions(
     req: NodePositionBatch,
-    _user: str = Depends(get_current_user),
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Batch update node positions (save layout)."""
@@ -405,18 +381,6 @@ async def update_positions(
         if ok:
             updated += 1
     return {"success": True, "updated": updated}
-
-
-# ── Protected devices info ────────────────────────────────────────
-
-@router.get("/protected")
-async def get_protected_devices():
-    """Return the list of protected default devices that cannot be deleted."""
-    return {
-        "protected_switches": sorted(PROTECTED_SWITCHES),
-        "protected_node_ids": sorted(PROTECTED_NODE_IDS),
-        "description": "These devices are part of the base infrastructure and cannot be deleted.",
-    }
 
 
 # ── List available hosts (netns) ─────────────────────────────────

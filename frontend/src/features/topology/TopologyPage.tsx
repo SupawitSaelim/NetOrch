@@ -42,18 +42,6 @@ const NODE_ICONS: Record<string, string> = {
   network: 'N',
 };
 
-// ── Protected (default) devices — cannot be deleted ──
-const PROTECTED_SWITCHES = new Set(['br0', 'br1']);
-const PROTECTED_NODE_PREFIXES = ['router-'];
-
-function isProtectedNode(node: { id: string; type: string; name: string }): boolean {
-  if (node.type === 'router') return true;
-  if (node.type === 'network') return true;
-  if (node.type === 'switch' && PROTECTED_SWITCHES.has(node.name)) return true;
-  if (PROTECTED_NODE_PREFIXES.some((p) => node.id.startsWith(p))) return true;
-  return false;
-}
-
 // ── D3 types ──
 interface SimNode extends d3.SimulationNodeDatum {
   id: string;
@@ -232,12 +220,8 @@ export default function TopologyPage() {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.key === 'Escape') { setMode('select'); setLinkSource(null); }
       if ((e.key === 'Delete' || e.key === 'Backspace') && propertiesNode) {
-        if (isProtectedNode(propertiesNode)) {
-          flash(`"${propertiesNode.name}" is a protected default device`, 'err');
-          return;
-        }
         if (propertiesNode.type === 'switch') deleteSwitchMut.mutate(propertiesNode.name);
-        if (propertiesNode.type === 'host') deleteHostMut.mutate(propertiesNode.name.replace('-veth', ''));
+        else if (propertiesNode.type === 'host') deleteHostMut.mutate(propertiesNode.name.replace('-veth', ''));
       }
     };
     window.addEventListener('keydown', handler);
@@ -404,17 +388,13 @@ export default function TopologyPage() {
       const m = modeRef.current;
 
       if (m === 'delete') {
-        if (isProtectedNode(d)) {
-          flash(`"${d.name}" is a protected default device`, 'err');
-          return;
-        }
         if (d.type === 'switch') {
           if (confirm(`Delete switch "${d.name}"?`)) deleteSwitchMut.mutate(d.name);
         } else if (d.type === 'host') {
           const hostName = d.name.replace('-veth', '');
           if (confirm(`Delete host "${hostName}"?`)) deleteHostMut.mutate(hostName);
         } else {
-          flash('Cannot delete this node type from builder', 'err');
+          flash(`Cannot delete ${d.type} nodes from builder`, 'err');
         }
         return;
       }
@@ -680,15 +660,8 @@ export default function TopologyPage() {
                   ))
                 )}
               </div>
-              {/* Protected badge */}
-              {isProtectedNode(propertiesNode) && (
-                <div style={{ marginTop: 12, padding: '8px 12px', borderRadius: 8, background: '#f59e0b15', border: '1px solid #f59e0b33', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <span style={{ fontSize: 14 }}>🔒</span>
-                  <span style={{ fontSize: 11, color: '#f59e0b', fontWeight: 600 }}>Protected default device — cannot be deleted</span>
-                </div>
-              )}
               {/* Delete button */}
-              {(propertiesNode.type === 'switch' || propertiesNode.type === 'host') && !isProtectedNode(propertiesNode) && (
+              {(propertiesNode.type === 'switch' || propertiesNode.type === 'host') && (
                 <div style={{ marginTop: 16 }}>
                   <button
                     onClick={() => {
