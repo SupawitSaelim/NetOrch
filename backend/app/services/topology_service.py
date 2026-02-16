@@ -211,6 +211,28 @@ class TopologyService:
                             _add_link(sw_id, host_id, port_name, port_name,
                                       bw=1000, status=pstatus)
 
+                            # If it's a veth host (e.g. pc1-veth), fetch IP & gateway from netns
+                            if port_name.endswith("-veth"):
+                                ns_name = port_name[:-5]  # strip "-veth"
+                                ip_r = await ssh_exec(
+                                    f"ip netns exec {ns_name} ip -4 addr show dev {ns_name}-eth0 2>/dev/null"
+                                    " | grep inet | awk '{print $2}'")
+                                host_ip = ip_r.stdout.strip() if ip_r.returncode == 0 else ""
+                                gw_r = await ssh_exec(
+                                    f"ip netns exec {ns_name} ip route show default 2>/dev/null"
+                                    " | awk '/default via/ {print $3}'")
+                                host_gw = gw_r.stdout.strip() if gw_r.returncode == 0 else ""
+                                if host_ip or host_gw:
+                                    hmeta: dict[str, Any] = {}
+                                    if host_ip:
+                                        hmeta["ip"] = host_ip
+                                    if host_gw:
+                                        hmeta["gateway"] = host_gw
+                                    for n in nodes:
+                                        if n["id"] == host_id:
+                                            n["metadata"].update(hmeta)
+                                            break
+
             # ---- 4) Network nodes from FRR static/connected routes ----
             route_r = await vtysh_exec("show ip route")
             if route_r.returncode == 0:
