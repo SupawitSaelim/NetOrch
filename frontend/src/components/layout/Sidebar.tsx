@@ -55,7 +55,6 @@ export default function Sidebar() {
     >
       {navItems.map((item) => {
         const isTopLevel = !item.children;
-        const hasChildren = !!item.children;
         const isExpanded = expandedMenu === item.path;
         const isParentActive = location.pathname.startsWith(item.path) && item.path !== '/';
 
