@@ -9,6 +9,7 @@ import {
   createLink,
   deleteLink,
 } from '../../api/endpoints';
+import type { Topology } from '../../types';
 import { SkeletonCard, ErrorBanner } from '../../components/Shared';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import * as d3 from 'd3';
@@ -135,7 +136,21 @@ export default function TopologyPage() {
 
   const deleteSwitchMut = useMutation({
     mutationFn: (name: string) => deleteSwitch(name),
-    onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['topology'] }); flash(r.data.message); setPropertiesNode(null); },
+    onSuccess: (r, deletedName) => {
+      // Optimistic: remove switch + connected links from cache immediately
+      qc.setQueryData(['topology'], (old: Topology | undefined) => {
+        if (!old) return old;
+        const removedIds = new Set(old.nodes.filter(n => n.name === deletedName && n.type === 'switch').map(n => n.id));
+        return {
+          ...old,
+          nodes: old.nodes.filter(n => !removedIds.has(n.id)),
+          links: old.links.filter(l => !removedIds.has(l.source) && !removedIds.has(l.target)),
+        };
+      });
+      qc.invalidateQueries({ queryKey: ['topology'] });
+      flash(r.data.message);
+      setPropertiesNode(null);
+    },
     onError: (e: any) => flash(e?.response?.data?.detail ?? 'Failed to delete switch', 'err'),
   });
 
@@ -148,7 +163,22 @@ export default function TopologyPage() {
 
   const deleteHostMut = useMutation({
     mutationFn: (name: string) => deleteHost(name),
-    onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['topology'] }); flash(r.data.message); setPropertiesNode(null); },
+    onSuccess: (r, deletedName) => {
+      // Optimistic: remove host + connected links from cache immediately
+      const vethName = `${deletedName}-veth`;
+      qc.setQueryData(['topology'], (old: Topology | undefined) => {
+        if (!old) return old;
+        const removedIds = new Set(old.nodes.filter(n => n.name === vethName && n.type === 'host').map(n => n.id));
+        return {
+          ...old,
+          nodes: old.nodes.filter(n => !removedIds.has(n.id)),
+          links: old.links.filter(l => !removedIds.has(l.source) && !removedIds.has(l.target)),
+        };
+      });
+      qc.invalidateQueries({ queryKey: ['topology'] });
+      flash(r.data.message);
+      setPropertiesNode(null);
+    },
     onError: (e: any) => flash(e?.response?.data?.detail ?? 'Failed to delete host', 'err'),
   });
 
@@ -165,7 +195,24 @@ export default function TopologyPage() {
 
   const deleteLinkMut = useMutation({
     mutationFn: (data: { sourceName: string; targetName: string }) => deleteLink(data.sourceName, data.targetName),
-    onSuccess: (r) => { qc.invalidateQueries({ queryKey: ['topology'] }); flash(r.data.message); },
+    onSuccess: (r, vars) => {
+      // Optimistic: remove link from cache immediately
+      qc.setQueryData(['topology'], (old: Topology | undefined) => {
+        if (!old) return old;
+        const srcNode = old.nodes.find(n => n.name === vars.sourceName);
+        const tgtNode = old.nodes.find(n => n.name === vars.targetName);
+        if (!srcNode || !tgtNode) return old;
+        return {
+          ...old,
+          links: old.links.filter(l =>
+            !((l.source === srcNode.id && l.target === tgtNode.id) ||
+              (l.source === tgtNode.id && l.target === srcNode.id))
+          ),
+        };
+      });
+      qc.invalidateQueries({ queryKey: ['topology'] });
+      flash(r.data.message);
+    },
     onError: (e: any) => flash(e?.response?.data?.detail ?? 'Failed to delete link', 'err'),
   });
 
