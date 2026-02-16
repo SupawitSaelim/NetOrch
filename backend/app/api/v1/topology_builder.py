@@ -22,6 +22,16 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/topology/builder", tags=["Topology Builder"])
 
+# ── Protected (default) devices — cannot be deleted ─────────────
+PROTECTED_SWITCHES: set[str] = {"br0", "br1"}
+PROTECTED_NODE_IDS: set[str] = {"router-001"}  # FRR router
+
+def _is_protected_switch(name: str) -> bool:
+    return name in PROTECTED_SWITCHES
+
+def _is_protected_node(node_id: str) -> bool:
+    return node_id in PROTECTED_NODE_IDS or node_id.startswith("router-")
+
 
 # ── Schemas ──────────────────────────────────────────────────────
 
@@ -137,6 +147,13 @@ async def delete_switch(
     _user: str = Depends(get_current_user),
 ):
     """Delete an OVS bridge (switch) from the VM."""
+    # Protected device guard
+    if _is_protected_switch(name):
+        raise HTTPException(
+            403,
+            detail=f"Bridge '{name}' is a protected default device and cannot be deleted",
+        )
+
     # Check exists
     r = await ovs_exec(f"ovs-vsctl br-exists {name}")
     if r.returncode != 0:
@@ -388,6 +405,18 @@ async def update_positions(
         if ok:
             updated += 1
     return {"success": True, "updated": updated}
+
+
+# ── Protected devices info ────────────────────────────────────────
+
+@router.get("/protected")
+async def get_protected_devices():
+    """Return the list of protected default devices that cannot be deleted."""
+    return {
+        "protected_switches": sorted(PROTECTED_SWITCHES),
+        "protected_node_ids": sorted(PROTECTED_NODE_IDS),
+        "description": "These devices are part of the base infrastructure and cannot be deleted.",
+    }
 
 
 # ── List available hosts (netns) ─────────────────────────────────
