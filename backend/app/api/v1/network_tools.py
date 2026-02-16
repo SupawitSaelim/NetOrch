@@ -165,6 +165,65 @@ async def arp_table(req: ArpRequest):
     }
 
 
+# ── MAC Address Table ────────────────────────────────────────────
+
+class MacRequest(BaseModel):
+    bridge: str          # OVS bridge name (e.g. "sw1")
+
+
+@router.post("/mac")
+async def mac_table(req: MacRequest):
+    """Get MAC address (FDB) table from an OVS bridge."""
+    bridge = _validate_name(req.bridge, "bridge")
+
+    # Try ovs-appctl fdb/show first (best for OVS bridges)
+    r = await ssh_exec(f"ovs-appctl fdb/show {bridge}")
+
+    entries = []
+    if r.returncode == 0 and r.stdout.strip():
+        for line in r.stdout.strip().split('\n'):
+            # Header: "port  VLAN  MAC                Age"
+            if line.strip().startswith('port') or not line.strip():
+                continue
+            parts = line.split()
+            if len(parts) >= 4:
+                entry: dict = {
+                    'port': parts[0],
+                    'vlan': parts[1],
+                    'mac': parts[2],
+                    'age': parts[3],
+                }
+                entries.append(entry)
+    else:
+        # Fallback: try ovs-ofctl dump-flows (extract dl_dst / dl_src MACs)
+        r2 = await ssh_exec(f"ovs-ofctl dump-flows {bridge}")
+        if r2.returncode == 0:
+            seen_macs: set = set()
+            for line in r2.stdout.strip().split('\n'):
+                for mac_match in re.finditer(r'dl_(?:src|dst)=([0-9a-fA-F:]{17})', line):
+                    mac_addr = mac_match.group(1)
+                    if mac_addr not in seen_macs:
+                        seen_macs.add(mac_addr)
+                        direction = 'src' if 'dl_src=' + mac_addr in line else 'dst'
+                        entries.append({
+                            'port': '—',
+                            'vlan': '—',
+                            'mac': mac_addr,
+                            'age': '—',
+                            'source': f'flow ({direction})',
+                        })
+            r = r2  # use for output
+
+    return {
+        "success": r.returncode == 0,
+        "bridge": bridge,
+        "output": r.stdout,
+        "error": r.stderr if r.returncode != 0 else None,
+        "entries": entries,
+        "total": len(entries),
+    }
+
+
 # ── List Hosts (for dropdown) ────────────────────────────────────
 
 @router.get("/hosts")
@@ -177,3 +236,15 @@ async def list_hosts():
         if name:
             hosts.append(name)
     return {"hosts": sorted(hosts)}
+
+
+@router.get("/bridges")
+async def list_bridges():
+    """List all OVS bridges available for MAC table lookup."""
+    r = await ssh_exec("ovs-vsctl list-br")
+    bridges = []
+    for line in r.stdout.strip().split('\n'):
+        name = line.strip()
+        if name:
+            bridges.append(name)
+    return {"bridges": sorted(bridges)}

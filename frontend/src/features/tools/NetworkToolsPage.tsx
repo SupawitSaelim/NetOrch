@@ -1,12 +1,12 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { toolPing, toolTraceroute, toolArp, toolListHosts, getTopology } from '../../api/endpoints';
+import { toolPing, toolTraceroute, toolArp, toolMac, toolListHosts, toolListBridges, getTopology } from '../../api/endpoints';
 
 /* ═══════════════════════════════════════════════════════════════
-   Network Tools — Ping, Traceroute, ARP from any host
+   Network Tools — Ping, Traceroute, ARP, MAC table
    ═══════════════════════════════════════════════════════════════ */
 
-type Tool = 'ping' | 'traceroute' | 'arp';
+type Tool = 'ping' | 'traceroute' | 'arp' | 'mac';
 
 interface HistoryEntry {
   id: number;
@@ -16,6 +16,7 @@ interface HistoryEntry {
   success: boolean;
   output: string;
   summary?: Record<string, unknown>;
+  entries?: { port: string; vlan: string; mac: string; age: string; source?: string }[];
   timestamp: Date;
 }
 
@@ -23,6 +24,7 @@ const TOOL_META: Record<Tool, { icon: string; label: string; color: string }> = 
   ping:       { icon: '🏓', label: 'Ping',       color: '#22c55e' },
   traceroute: { icon: '🗺️', label: 'Traceroute', color: '#3b82f6' },
   arp:        { icon: '📋', label: 'ARP Table',  color: '#f59e0b' },
+  mac:        { icon: '📟', label: 'MAC Table', color: '#8b5cf6' },
 };
 
 export default function NetworkToolsPage() {
@@ -30,11 +32,13 @@ export default function NetworkToolsPage() {
   const [source, setSource] = useState('');
   const [target, setTarget] = useState('');
   const [count, setCount] = useState(4);
+  const [bridge, setBridge] = useState('');
   const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [activeResult, setActiveResult] = useState<HistoryEntry | null>(null);
 
-  // Fetch available hosts 
+  // Fetch available hosts & bridges
   const hostsQ = useQuery({ queryKey: ['tool-hosts'], queryFn: () => toolListHosts().then(r => r.data.hosts) });
+  const bridgesQ = useQuery({ queryKey: ['tool-bridges'], queryFn: () => toolListBridges().then(r => r.data.bridges) });
   const topoQ = useQuery({ queryKey: ['topology'], queryFn: () => getTopology().then(r => r.data) });
 
   // Build source options: netns hosts + topology hosts
@@ -79,9 +83,20 @@ export default function NetworkToolsPage() {
     onError: (e: any) => addToHistory({ tool: 'arp', source, target: '', success: false, output: e?.response?.data?.detail ?? e.message }),
   });
 
-  const isRunning = pingMut.isPending || traceMut.isPending || arpMut.isPending;
+  const macMut = useMutation({
+    mutationFn: () => toolMac({ bridge }),
+    onSuccess: (r) => addToHistory({ tool: 'mac', source: bridge, target: '', success: r.data.success, output: r.data.output, entries: r.data.entries }),
+    onError: (e: any) => addToHistory({ tool: 'mac', source: bridge, target: '', success: false, output: e?.response?.data?.detail ?? e.message }),
+  });
+
+  const isRunning = pingMut.isPending || traceMut.isPending || arpMut.isPending || macMut.isPending;
 
   const handleRun = () => {
+    if (tool === 'mac') {
+      if (!bridge) return;
+      macMut.mutate();
+      return;
+    }
     if (!source) return;
     if (tool === 'ping' && !target) return;
     if (tool === 'traceroute' && !target) return;
@@ -89,6 +104,14 @@ export default function NetworkToolsPage() {
     else if (tool === 'traceroute') traceMut.mutate();
     else arpMut.mutate();
   };
+
+  // Dynamic disable logic
+  const isDisabled = (() => {
+    if (isRunning) return true;
+    if (tool === 'mac') return !bridge;
+    if (tool === 'arp') return !source;
+    return !source || !target;
+  })();
 
   const inputStyle: React.CSSProperties = {
     padding: '10px 14px', borderRadius: 10, fontSize: 13,
@@ -104,7 +127,7 @@ export default function NetworkToolsPage() {
       <div style={{ marginBottom: 20 }}>
         <h2 style={{ fontSize: 22, fontWeight: 700, margin: '0 0 4px' }}>🏓 Network Tools</h2>
         <p style={{ color: 'var(--color-text-muted)', margin: 0, fontSize: 13 }}>
-          Ping, Traceroute, and ARP table — test connectivity from any host
+          Ping, Traceroute, ARP &amp; MAC table — test connectivity from any host
         </p>
       </div>
 
@@ -140,18 +163,41 @@ export default function NetworkToolsPage() {
             </div>
           </div>
 
-          {/* Source */}
-          <div>
-            <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 6, display: 'block' }}>
-              SOURCE HOST
-            </label>
-            <select value={source} onChange={(e) => setSource(e.target.value)} style={inputStyle}>
-              <option value="">— Select Host —</option>
-              {hostOptions.map((h) => (
-                <option key={h} value={h}>{h}{hostIPs[h] ? ` (${hostIPs[h]})` : ''}</option>
-              ))}
-            </select>
-          </div>
+          {/* Source (hide for MAC table) */}
+          {tool !== 'mac' && (
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 6, display: 'block' }}>
+                SOURCE HOST
+              </label>
+              <select value={source} onChange={(e) => setSource(e.target.value)} style={inputStyle}>
+                <option value="">— Select Host —</option>
+                {hostOptions.map((h) => (
+                  <option key={h} value={h}>{h}{hostIPs[h] ? ` (${hostIPs[h]})` : ''}</option>
+                ))}
+              </select>
+            </div>
+          )}
+
+          {/* Bridge selector (MAC table only) */}
+          {tool === 'mac' && (
+            <div>
+              <label style={{ fontSize: 11, fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 6, display: 'block' }}>
+                OVS BRIDGE
+              </label>
+              <select value={bridge} onChange={(e) => setBridge(e.target.value)} style={inputStyle}>
+                <option value="">— Select Bridge —</option>
+                {(bridgesQ.data ?? []).map((b) => (
+                  <option key={b} value={b}>{b}</option>
+                ))}
+              </select>
+              {bridgesQ.isLoading && (
+                <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 4 }}>Loading bridges...</div>
+              )}
+              {bridgesQ.data?.length === 0 && !bridgesQ.isLoading && (
+                <div style={{ fontSize: 10, color: '#f59e0b', marginTop: 4 }}>No OVS bridges found</div>
+              )}
+            </div>
+          )}
 
           {/* Target (not for ARP) */}
           {tool !== 'arp' && (
@@ -196,11 +242,11 @@ export default function NetworkToolsPage() {
 
           {/* Run button */}
           <button onClick={handleRun}
-            disabled={isRunning || !source || (tool !== 'arp' && !target)}
+            disabled={isDisabled}
             style={{
               padding: '12px 20px', borderRadius: 12, border: 'none', cursor: 'pointer',
               background: meta.color, color: '#fff', fontSize: 14, fontWeight: 700,
-              opacity: (isRunning || !source || (tool !== 'arp' && !target)) ? 0.4 : 1,
+              opacity: isDisabled ? 0.4 : 1,
               transition: 'all 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
             }}>
             {isRunning ? (
@@ -263,7 +309,9 @@ export default function NetworkToolsPage() {
                 <span style={{ fontSize: 24 }}>{TOOL_META[activeResult.tool].icon}</span>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontSize: 14, fontWeight: 700 }}>
-                    {TOOL_META[activeResult.tool].label}: {activeResult.source} → {activeResult.target || '(self)'}
+                    {TOOL_META[activeResult.tool].label}: {activeResult.tool === 'mac'
+                      ? `Bridge ${activeResult.source}`
+                      : `${activeResult.source} → ${activeResult.target || '(self)'}`}
                   </div>
                   <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
                     {activeResult.timestamp.toLocaleString()}
@@ -297,6 +345,77 @@ export default function NetworkToolsPage() {
                       <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginTop: 2 }}>{s.label}</div>
                     </div>
                   ))}
+                </div>
+              )}
+
+              {/* MAC table entries */}
+              {activeResult.tool === 'mac' && activeResult.entries && activeResult.entries.length > 0 && (
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{
+                    display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                    marginBottom: 10,
+                  }}>
+                    <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--color-text)' }}>
+                      📟 {activeResult.entries.length} MAC {activeResult.entries.length === 1 ? 'entry' : 'entries'}
+                    </span>
+                    <input
+                      type="text"
+                      placeholder="Filter MAC / port..."
+                      id="mac-filter"
+                      onChange={() => {/* filter handled via CSS / state outside for simplicity */}}
+                      style={{
+                        padding: '5px 10px', borderRadius: 8, fontSize: 11,
+                        background: 'var(--color-bg)', border: '1px solid var(--color-border)',
+                        color: 'var(--color-text)', outline: 'none', width: 180,
+                      }}
+                    />
+                  </div>
+                  <div style={{
+                    border: '1px solid var(--color-border)', borderRadius: 12, overflow: 'hidden',
+                  }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 12 }}>
+                      <thead>
+                        <tr style={{ background: 'var(--color-bg)' }}>
+                          {['Port', 'VLAN', 'MAC Address', 'Age', ...(activeResult.entries.some(e => e.source) ? ['Source'] : [])].map((h) => (
+                            <th key={h} style={{
+                              padding: '10px 14px', textAlign: 'left', fontWeight: 700,
+                              fontSize: 10, color: 'var(--color-text-muted)', textTransform: 'uppercase',
+                              borderBottom: '1px solid var(--color-border)',
+                            }}>{h}</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {activeResult.entries.map((entry, i) => (
+                          <tr key={i} style={{
+                            background: i % 2 === 0 ? 'transparent' : 'var(--color-bg)',
+                            transition: 'background 0.1s',
+                          }}>
+                            <td style={{ padding: '8px 14px', borderBottom: '1px solid var(--color-border)' }}>
+                              <span style={{
+                                padding: '2px 8px', borderRadius: 6, fontSize: 11, fontWeight: 600,
+                                background: '#8b5cf620', color: '#8b5cf6',
+                              }}>{entry.port}</span>
+                            </td>
+                            <td style={{ padding: '8px 14px', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
+                              {entry.vlan}
+                            </td>
+                            <td style={{ padding: '8px 14px', borderBottom: '1px solid var(--color-border)', fontFamily: 'monospace', fontWeight: 600 }}>
+                              {entry.mac}
+                            </td>
+                            <td style={{ padding: '8px 14px', borderBottom: '1px solid var(--color-border)', color: 'var(--color-text-muted)' }}>
+                              {entry.age}
+                            </td>
+                            {entry.source && (
+                              <td style={{ padding: '8px 14px', borderBottom: '1px solid var(--color-border)', fontSize: 10, color: 'var(--color-text-muted)' }}>
+                                {entry.source}
+                              </td>
+                            )}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
 

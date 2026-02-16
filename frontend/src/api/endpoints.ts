@@ -179,5 +179,15 @@ export const toolArp = (data: { source: string }) =>
     entries: { ip: string; mac?: string; state: string; interface: string }[];
   }>('/tools/arp', data);
 
+export const toolMac = (data: { bridge: string }) =>
+  client.post<{
+    success: boolean; bridge: string; output: string; error: string | null;
+    entries: { port: string; vlan: string; mac: string; age: string; source?: string }[];
+    total: number;
+  }>('/tools/mac', data);
+
 export const toolListHosts = () =>
   client.get<{ hosts: string[] }>('/tools/hosts');
+
+export const toolListBridges = () =>
+  client.get<{ bridges: string[] }>('/tools/bridges');
