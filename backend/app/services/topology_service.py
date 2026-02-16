@@ -107,23 +107,6 @@ class TopologyService:
             })
 
         try:
-            # ---- 1) FRR router node ----
-            bgp_r = await vtysh_exec("show ip bgp summary")
-            router_id = ""
-            if bgp_r.returncode == 0:
-                m = re.search(r'BGP router identifier (\S+), local AS number (\d+)',
-                              bgp_r.stdout)
-                if m:
-                    router_id = m.group(1)
-
-            hostname_r = await ssh_exec("hostname -s")
-            rname = hostname_r.stdout.strip()
-            if not rname or rname == "localhost":
-                rname = "frr-router"
-            if router_id:
-                rname += f" ({router_id})"
-            _add_node("router-001", "router", rname)
-
             # ---- 2) OVS bridges → switch nodes ----
             br_r = await ovs_exec("ovs-vsctl list-br")
             bridge_names: list[str] = []
@@ -154,10 +137,6 @@ class TopologyService:
                 # Check bridge link state
                 link_r = await ssh_exec(f"cat /sys/class/net/{br_name}/operstate 2>/dev/null || echo unknown")
                 br_status = "up" if link_r.stdout.strip() in ("up", "unknown") else "down"
-
-                # Link router→switch (bridges are on the same VM as FRR)
-                _add_link("router-001", sw_id, "internal", br_name,
-                          bw=10000, status=br_status)
 
                 # ---- 3) Ports on this bridge → host / VXLAN nodes ----
                 ports_r = await ovs_exec(f"ovs-vsctl list-ports {br_name}")
@@ -263,27 +242,6 @@ class TopologyService:
                                             if n["id"] == host_id:
                                                 n["metadata"].update(hmeta)
                                                 break
-
-            # ---- 4) Network nodes from FRR static/connected routes ----
-            route_r = await vtysh_exec("show ip route")
-            if route_r.returncode == 0:
-                seen_nets: set[str] = set()
-                for line in route_r.stdout.splitlines():
-                    # Connected and Static routes – require IP-like destination
-                    m = re.match(r'^([CS])([>*\s]{0,3})\s*(\d+\.\d+\.\d+\.\d+/\d+)', line.strip())
-                    if not m:
-                        continue
-                    _, _, dest = m.groups()
-                    if dest in seen_nets or dest == "0.0.0.0/0":
-                        continue
-                    seen_nets.add(dest)
-                    net_id = f"net-{dest.replace('/', '_').replace('.', '-')}"
-                    iface_m = re.search(r',\s+(\w[\w\d.]+)', line)
-                    iface_name = iface_m.group(1) if iface_m else ""
-                    _add_node(net_id, "network", dest)
-                    status = "up"
-                    _add_link("router-001", net_id, iface_name, "",
-                              bw=1000, status=status)
 
             # ---- 5) Standalone hosts/routers (network namespaces not yet linked) ----
             ns_r = await ssh_exec("ip netns list 2>/dev/null")
@@ -410,19 +368,6 @@ class TopologyService:
                         lstatus = "up" if st_r.stdout.strip() in ("up", "unknown") else "down"
                         _add_link(vrouter_id, cloud_id, iface, "WAN",
                                   bw=1000, status=lstatus)
-
-            # ---- 9) Physical uplink interface (enp0s*) ----
-            iface_r = await ssh_exec("ip -br link | grep '^enp'")
-            if iface_r.returncode == 0:
-                for iline in iface_r.stdout.splitlines():
-                    parts = iline.split()
-                    if len(parts) >= 2:
-                        ifname = parts[0]
-                        ifstatus = "up" if parts[1] == "UP" else "down"
-                        uplink_id = f"uplink-{ifname}"
-                        _add_node(uplink_id, "network", f"WAN ({ifname})")
-                        _add_link("router-001", uplink_id, ifname, "",
-                                  bw=1000, status=ifstatus)
 
         except Exception as exc:
             logger.error("Topology discovery failed: %s", exc)
