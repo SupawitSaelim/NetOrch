@@ -4,6 +4,7 @@ import Layout from './components/layout/Layout';
 
 const Dashboard = lazy(() => import('./features/dashboard/Dashboard'));
 const TopologyPage = lazy(() => import('./features/topology/TopologyPage'));
+const TopologyDetailsPage = lazy(() => import('./features/topology/TopologyDetailsPage'));
 const RoutingPage = lazy(() => import('./features/routing/RoutingPage'));
 const FlowsPage = lazy(() => import('./features/flows/FlowsPage'));
 const MonitoringPage = lazy(() => import('./features/monitoring/MonitoringPage'));
@@ -36,6 +37,14 @@ export default function App() {
           element={
             <Suspense fallback={<Loading />}>
               <TopologyPage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="topology/details"
+          element={
+            <Suspense fallback={<Loading />}>
+              <TopologyDetailsPage />
             </Suspense>
           }
         />

@@ -36,13 +36,6 @@ const NODE_LABELS: Record<string, string> = {
   network: '◎',
 };
 
-const NODE_ICONS: Record<string, string> = {
-  switch: 'B',
-  router: 'R',
-  host: 'H',
-  network: 'N',
-};
-
 // ── D3 types ──
 interface SimNode extends d3.SimulationNodeDatum {
   id: string;
@@ -103,7 +96,7 @@ export default function TopologyPage() {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [tooltip, setTooltip] = useState<{ x: number; y: number; node: SimNode } | null>(null);
-  const [dimensions, setDimensions] = useState({ width: 900, height: 560 });
+  const [dimensions, setDimensions] = useState({ width: 900, height: 720 });
   const transformRef = useRef<d3.ZoomTransform>(d3.zoomIdentity);
   // Keep a ref to mode so D3 event handlers see latest value
   const modeRef = useRef<BuilderMode>(mode);
@@ -697,7 +690,7 @@ export default function TopologyPage() {
         <div ref={containerRef} className="fade-in"
           style={{
             flex: 1, position: 'relative', background: 'var(--color-bg-card)', border: '1px solid var(--color-border)',
-            borderRadius: 12, overflow: 'hidden', height: 560,
+            borderRadius: 12, overflow: 'hidden', minHeight: 720,
             cursor: mode === 'addSwitch' || mode === 'addHost' ? 'crosshair' : mode === 'delete' ? 'not-allowed' : 'default',
           }}>
           {/* Grid */}
@@ -761,7 +754,7 @@ export default function TopologyPage() {
         </div>
 
         {/* Properties Panel */}
-        <div style={{ width: 280, flexShrink: 0, background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', borderRadius: 12, padding: 16, overflow: 'auto', maxHeight: 560 }}>
+        <div style={{ width: 280, flexShrink: 0, background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', borderRadius: 12, padding: 16, overflow: 'auto', maxHeight: 720 }}>
           <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>📋 Properties</h3>
           {!propertiesNode ? (
             <div style={{ color: 'var(--color-text-muted)', fontSize: 12, textAlign: 'center', padding: '40px 0' }}>
@@ -821,51 +814,6 @@ export default function TopologyPage() {
           )}
         </div>
       </div>
-
-      {/* Node & Link Tables */}
-      {nodes.length > 0 && (
-        <div className="fade-in" style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginTop: 16 }}>
-          <div style={{ flex: '1 1 250px', background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', borderRadius: 12, padding: 20 }}>
-            <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Nodes ({nodes.length})</h3>
-            {nodes.map((n) => (
-              <div key={n.id}
-                onClick={() => setPropertiesNode({ id: n.id, type: n.type, name: n.name, dpid: n.dpid, metadata: n.metadata })}
-                style={{ display: 'flex', gap: 8, padding: '6px 0', borderBottom: '1px solid var(--color-border)', fontSize: 13, cursor: 'pointer' }}>
-                <span>{NODE_ICONS[n.type]}</span>
-                <span style={{ fontWeight: 500 }}>{n.name}</span>
-                <span style={{ color: 'var(--color-text-muted)', marginLeft: 'auto' }}>{n.type}</span>
-              </div>
-            ))}
-          </div>
-          <div style={{ flex: '2 1 350px', background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', borderRadius: 12, padding: 20 }}>
-            <h3 style={{ fontSize: 16, fontWeight: 600, marginBottom: 12 }}>Links ({links.length})</h3>
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
-              <thead>
-                <tr style={{ borderBottom: '1px solid var(--color-border)', textAlign: 'left' }}>
-                  <th style={{ padding: 6 }}>Source</th>
-                  <th style={{ padding: 6 }}>Target</th>
-                  <th style={{ padding: 6 }}>Ports</th>
-                  <th style={{ padding: 6 }}>BW</th>
-                  <th style={{ padding: 6 }}>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {links.map((l) => (
-                  <tr key={l.id} style={{ borderBottom: '1px solid var(--color-border)' }}>
-                    <td style={{ padding: 6 }}>{l.source}</td>
-                    <td style={{ padding: 6 }}>{l.target}</td>
-                    <td style={{ padding: 6, fontFamily: 'monospace', fontSize: 11 }}>{l.source_port}↔{l.target_port}</td>
-                    <td style={{ padding: 6 }}>{l.bandwidth ? `${l.bandwidth}M` : '-'}</td>
-                    <td style={{ padding: 6, color: l.status === 'up' ? 'var(--color-success)' : 'var(--color-danger)', fontWeight: 600 }}>
-                      {l.status === 'up' ? '● Up' : '○ Down'}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
 
       {/* Toast */}
       {toast && (
