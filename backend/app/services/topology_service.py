@@ -136,6 +136,19 @@ class TopologyService:
 
             patch_links_seen: set[tuple[str, str]] = set()  # track patch links to avoid duplicates
 
+            # ---- Pre-scan: identify VRouter namespaces (ip_forward=1) ----
+            vrouter_names: set[str] = set()
+            ns_pre = await ssh_exec("ip netns list 2>/dev/null")
+            if ns_pre.returncode == 0:
+                for ns_line in ns_pre.stdout.splitlines():
+                    ns_name = ns_line.split()[0].strip() if ns_line.strip() else ""
+                    if ns_name:
+                        fwd_r = await ssh_exec(
+                            f"ip netns exec {ns_name} sysctl -n net.ipv4.ip_forward 2>/dev/null"
+                        )
+                        if fwd_r.returncode == 0 and fwd_r.stdout.strip() == "1":
+                            vrouter_names.add(ns_name)
+
             for idx, br_name in enumerate(bridge_names):
                 dpid_r = await ovs_exec(f"ovs-vsctl get bridge {br_name} datapath_id")
                 dpid = dpid_r.stdout.strip().replace('"', '') if dpid_r.returncode == 0 else ""
@@ -205,33 +218,55 @@ class TopologyService:
                                                       port_name, peer_name,
                                                       bw=10000, status=pstatus)
                         else:
-                            # Regular port → host node
-                            host_id = f"host-{port_name}"
-                            _add_node(host_id, "host", port_name)
-                            _add_link(sw_id, host_id, port_name, port_name,
-                                      bw=1000, status=pstatus)
-
-                            # If it's a veth host (e.g. pc1-veth), fetch IP & gateway from netns
-                            if port_name.endswith("-veth"):
-                                ns_name = port_name[:-5]  # strip "-veth"
-                                ip_r = await ssh_exec(
-                                    f"ip netns exec {ns_name} ip -4 addr show dev {ns_name}-eth0 2>/dev/null"
-                                    " | grep inet | awk '{print $2}'")
-                                host_ip = ip_r.stdout.strip() if ip_r.returncode == 0 else ""
-                                gw_r = await ssh_exec(
-                                    f"ip netns exec {ns_name} ip route show default 2>/dev/null"
-                                    " | awk '/default via/ {print $3}'")
-                                host_gw = gw_r.stdout.strip() if gw_r.returncode == 0 else ""
-                                if host_ip or host_gw:
-                                    hmeta: dict[str, Any] = {}
-                                    if host_ip:
-                                        hmeta["ip"] = host_ip
-                                    if host_gw:
-                                        hmeta["gateway"] = host_gw
+                            # Check if this is a VRouter port (e.g. router1-veth0)
+                            vr_match = re.match(r'^(.+)-veth(\d+)$', port_name)
+                            if vr_match and vr_match.group(1) in vrouter_names:
+                                rname = vr_match.group(1)
+                                vrouter_id = f"vrouter-{rname}"
+                                if vrouter_id not in node_ids:
+                                    _add_node(vrouter_id, "router", rname)
+                                    # Get all IPs in the namespace
+                                    ip_r = await ssh_exec(
+                                        f"ip netns exec {rname} ip -4 addr show 2>/dev/null"
+                                        " | grep inet | grep -v 127.0.0.1 | awk '{print $2}'")
+                                    ips = [x.strip() for x in ip_r.stdout.strip().splitlines()
+                                           ] if ip_r.returncode == 0 and ip_r.stdout.strip() else []
                                     for n in nodes:
-                                        if n["id"] == host_id:
-                                            n["metadata"].update(hmeta)
+                                        if n["id"] == vrouter_id:
+                                            n["metadata"]["ip_forward"] = True
+                                            if ips:
+                                                n["metadata"]["ip"] = ", ".join(ips)
                                             break
+                                _add_link(sw_id, vrouter_id, port_name, port_name,
+                                          bw=1000, status=pstatus)
+                            else:
+                                # Regular port → host node
+                                host_id = f"host-{port_name}"
+                                _add_node(host_id, "host", port_name)
+                                _add_link(sw_id, host_id, port_name, port_name,
+                                          bw=1000, status=pstatus)
+
+                                # If it's a veth host (e.g. pc1-veth), fetch IP & gateway from netns
+                                if port_name.endswith("-veth"):
+                                    ns_name = port_name[:-5]  # strip "-veth"
+                                    ip_r = await ssh_exec(
+                                        f"ip netns exec {ns_name} ip -4 addr show dev {ns_name}-eth0 2>/dev/null"
+                                        " | grep inet | awk '{print $2}'")
+                                    host_ip = ip_r.stdout.strip() if ip_r.returncode == 0 else ""
+                                    gw_r = await ssh_exec(
+                                        f"ip netns exec {ns_name} ip route show default 2>/dev/null"
+                                        " | awk '/default via/ {print $3}'")
+                                    host_gw = gw_r.stdout.strip() if gw_r.returncode == 0 else ""
+                                    if host_ip or host_gw:
+                                        hmeta: dict[str, Any] = {}
+                                        if host_ip:
+                                            hmeta["ip"] = host_ip
+                                        if host_gw:
+                                            hmeta["gateway"] = host_gw
+                                        for n in nodes:
+                                            if n["id"] == host_id:
+                                                n["metadata"].update(hmeta)
+                                                break
 
             # ---- 4) Network nodes from FRR static/connected routes ----
             route_r = await vtysh_exec("show ip route")
@@ -254,7 +289,7 @@ class TopologyService:
                     _add_link("router-001", net_id, iface_name, "",
                               bw=1000, status=status)
 
-            # ---- 5) Standalone hosts (network namespaces not yet linked) ----
+            # ---- 5) Standalone hosts/routers (network namespaces not yet linked) ----
             ns_r = await ssh_exec("ip netns list 2>/dev/null")
             if ns_r.returncode == 0:
                 for ns_line in ns_r.stdout.splitlines():
@@ -262,6 +297,26 @@ class TopologyService:
                     ns_name = ns_line.split()[0].strip() if ns_line.strip() else ""
                     if not ns_name:
                         continue
+
+                    # Check if this is a VRouter
+                    if ns_name in vrouter_names:
+                        vrouter_id = f"vrouter-{ns_name}"
+                        if vrouter_id not in node_ids:
+                            _add_node(vrouter_id, "router", ns_name)
+                            ip_r = await ssh_exec(
+                                f"ip netns exec {ns_name} ip -4 addr show 2>/dev/null"
+                                " | grep inet | grep -v 127.0.0.1 | awk '{print $2}'")
+                            ips = [x.strip() for x in ip_r.stdout.strip().splitlines()
+                                   ] if ip_r.returncode == 0 and ip_r.stdout.strip() else []
+                            for n in nodes:
+                                if n["id"] == vrouter_id:
+                                    n["metadata"]["ip_forward"] = True
+                                    if ips:
+                                        n["metadata"]["ip"] = ", ".join(ips)
+                                    break
+                        continue
+
+                    # Regular host
                     veth_host = f"{ns_name}-veth"
                     host_id = f"host-{veth_host}"
                     if host_id not in node_ids:

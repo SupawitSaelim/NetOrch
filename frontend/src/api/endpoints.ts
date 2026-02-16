@@ -119,11 +119,26 @@ export const deleteHost = (name: string) =>
 export const listHosts = () =>
   client.get<{ hosts: { name: string; ip: string }[]; total: number }>('/topology/builder/hosts');
 
+// --- Topology Builder: Routers ---
+export const createRouter = (data: {
+  name: string;
+  x?: number;
+  y?: number;
+}) =>
+  client.post<{ success: boolean; message: string; name: string }>(
+    '/topology/builder/routers',
+    data,
+  );
+
+export const deleteRouter = (name: string) =>
+  client.delete<{ success: boolean; message: string }>(`/topology/builder/routers/${name}`);
+
 export const createLink = (data: {
   source_id: string;
   target_id: string;
   source_name: string;
   target_name: string;
+  ip?: string;
 }) =>
   client.post<{ success: boolean; message: string; link_type: string }>(
     '/topology/builder/links',

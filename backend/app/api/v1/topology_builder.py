@@ -42,11 +42,18 @@ class CreateHostRequest(BaseModel):
     gateway: str | None = None
 
 
+class CreateRouterRequest(BaseModel):
+    name: str
+    x: float | None = None
+    y: float | None = None
+
+
 class CreateLinkRequest(BaseModel):
     source_id: str  # topology node id (e.g. "switch-001")
     target_id: str  # topology node id
     source_name: str  # actual OVS bridge / host name
     target_name: str
+    ip: str | None = None  # IP for router interface (e.g. "10.0.0.1/24")
 
 
 class NodePositionBatch(BaseModel):
@@ -244,6 +251,72 @@ async def delete_host(
     return {"success": True, "message": f"Host '{name}' deleted"}
 
 
+# ── Router (VRouter) CRUD ────────────────────────────────────────
+
+@router.post("/routers", status_code=status.HTTP_201_CREATED)
+async def create_router(
+    req: CreateRouterRequest,
+    orch: Orchestrator = Depends(get_orchestrator),
+):
+    """Create a virtual router (netns with IP forwarding enabled)."""
+    name = req.name.strip().replace(" ", "-")
+    if not name:
+        raise HTTPException(400, detail="Name is required")
+
+    if await _host_exists(name):
+        raise HTTPException(409, detail=f"Namespace '{name}' already exists")
+
+    # Create network namespace
+    r = await ssh_exec(f"ip netns add {name}")
+    if r.returncode != 0:
+        raise HTTPException(500, detail=f"Failed to create namespace: {r.stderr}")
+
+    # Enable IP forwarding
+    await ssh_exec(f"ip netns exec {name} sysctl -w net.ipv4.ip_forward=1")
+
+    # Bring up loopback
+    await ssh_exec(f"ip netns exec {name} ip link set lo up")
+
+    # Save position
+    if req.x is not None and req.y is not None:
+        topo = await orch.topology.get_topology()
+        for node in topo["nodes"]:
+            if node["name"] == name and node["type"] == "router":
+                await orch.topology.update_node_position(
+                    node["id"], {"x": req.x, "y": req.y}
+                )
+                break
+
+    logger.info("Created virtual router: %s", name)
+    return {"success": True, "message": f"Router '{name}' created", "name": name}
+
+
+@router.delete("/routers/{name}")
+async def delete_router(name: str):
+    """Delete a virtual router (netns) and clean up all its interfaces."""
+    if not await _host_exists(name):
+        raise HTTPException(404, detail=f"Router '{name}' not found")
+
+    # Find and remove all veth interfaces on the host side
+    list_r = await ssh_exec(
+        f"ip -o link show 2>/dev/null | grep -oP '{name}-veth\\d+'"
+    )
+    if list_r.returncode == 0 and list_r.stdout.strip():
+        for veth in list_r.stdout.strip().splitlines():
+            veth = veth.strip()
+            if veth:
+                await ovs_exec(f"ovs-vsctl --if-exists del-port {veth}")
+                await ssh_exec(f"ip link del {veth} 2>/dev/null")
+
+    # Delete the namespace
+    r = await ssh_exec(f"ip netns del {name}")
+    if r.returncode != 0:
+        raise HTTPException(500, detail=f"Failed to delete router: {r.stderr}")
+
+    logger.info("Deleted virtual router: %s", name)
+    return {"success": True, "message": f"Router '{name}' deleted"}
+
+
 # ── Link CRUD ────────────────────────────────────────────────────
 
 @router.post("/links", status_code=status.HTTP_201_CREATED)
@@ -329,6 +402,60 @@ async def create_link(
             "message": f"Linked {src_name} ↔ {tgt_name}",
             "link_type": "patch",
             "patch_ports": [patch_a, patch_b],
+        }
+
+    # ── vrouter ↔ switch (veth pair with IP on router side) ──
+    if (src_type == "vrouter" and tgt_type == "switch") or \
+       (src_type == "switch" and tgt_type == "vrouter"):
+        bridge = src_name if src_type == "switch" else tgt_name
+        router_name = tgt_name if tgt_type == "vrouter" else src_name
+
+        # Find next available interface index
+        next_r = await ssh_exec(
+            f"ip -o link show 2>/dev/null | grep -oP '{router_name}-veth\\d+' | "
+            f"sed 's/{router_name}-veth//' | sort -n | tail -1"
+        )
+        idx_str = next_r.stdout.strip() if next_r.returncode == 0 else ""
+        next_idx = int(idx_str) + 1 if idx_str.isdigit() else 0
+
+        eth_name = f"{router_name}-eth{next_idx}"
+        veth_name = f"{router_name}-veth{next_idx}"
+
+        # Create veth pair
+        r = await ssh_exec(f"ip link add {veth_name} type veth peer name {eth_name}")
+        if r.returncode != 0:
+            raise HTTPException(500, detail=f"Failed to create veth pair: {r.stderr}")
+
+        # Move eth end to router namespace
+        r = await ssh_exec(f"ip link set {eth_name} netns {router_name}")
+        if r.returncode != 0:
+            await ssh_exec(f"ip link del {veth_name} 2>/dev/null")
+            raise HTTPException(500, detail=f"Failed to move interface to namespace: {r.stderr}")
+
+        # Add veth end to OVS bridge
+        r = await ovs_exec(f"ovs-vsctl add-port {bridge} {veth_name}")
+        if r.returncode != 0:
+            await ssh_exec(f"ip link del {veth_name} 2>/dev/null")
+            raise HTTPException(500, detail=f"Failed to add port to bridge: {r.stderr}")
+
+        # Bring both interfaces up
+        await ssh_exec(f"ip link set {veth_name} up")
+        await ssh_exec(f"ip netns exec {router_name} ip link set {eth_name} up")
+
+        # Assign IP if provided
+        if req.ip:
+            await ssh_exec(
+                f"ip netns exec {router_name} ip addr add {req.ip} dev {eth_name}"
+            )
+
+        logger.info("Linked router %s (eth%d) to switch %s", router_name, next_idx, bridge)
+        return {
+            "success": True,
+            "message": f"Linked {router_name} ↔ {bridge}"
+                       + (f" (IP: {req.ip})" if req.ip else ""),
+            "link_type": "router-switch",
+            "interface": eth_name,
+            "veth": veth_name,
         }
 
     raise HTTPException(400, detail=f"Unsupported link: {src_type} ↔ {tgt_type}")

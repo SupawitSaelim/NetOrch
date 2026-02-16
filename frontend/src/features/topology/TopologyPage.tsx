@@ -8,6 +8,8 @@ import {
   deleteHost,
   createLink,
   deleteLink,
+  createRouter,
+  deleteRouter,
 } from '../../api/endpoints';
 import type { Topology } from '../../types';
 import { SkeletonCard, ErrorBanner } from '../../components/Shared';
@@ -20,7 +22,7 @@ import * as d3 from 'd3';
    ─ Drag-to-link, click to place, right-click to delete
    ═══════════════════════════════════════════════════════════════ */
 
-type BuilderMode = 'select' | 'addSwitch' | 'addHost' | 'addLink' | 'delete';
+type BuilderMode = 'select' | 'addSwitch' | 'addHost' | 'addRouter' | 'addLink' | 'delete';
 
 const NODE_COLORS: Record<string, string> = {
   switch: '#3b82f6',
@@ -67,6 +69,10 @@ interface CreateHostForm {
   gateway: string;
 }
 
+interface CreateRouterForm {
+  name: string;
+}
+
 /* ══════════════════════════ COMPONENT ══════════════════════════ */
 
 export default function TopologyPage() {
@@ -87,6 +93,10 @@ export default function TopologyPage() {
   const [linkSource, setLinkSource] = useState<SimNode | null>(null);
   const [showSwitchDialog, setShowSwitchDialog] = useState(false);
   const [showHostDialog, setShowHostDialog] = useState(false);
+  const [showRouterDialog, setShowRouterDialog] = useState(false);
+  const [showLinkIpDialog, setShowLinkIpDialog] = useState(false);
+  const [pendingLinkData, setPendingLinkData] = useState<{ source_id: string; target_id: string; source_name: string; target_name: string } | null>(null);
+  const [linkIp, setLinkIp] = useState('');
   const [pendingPosition, setPendingPosition] = useState<{ x: number; y: number } | null>(null);
   const [toast, setToast] = useState<{ msg: string; type: 'ok' | 'err' } | null>(null);
 
@@ -108,6 +118,7 @@ export default function TopologyPage() {
   // ── Form state ──
   const [switchForm, setSwitchForm] = useState<CreateSwitchForm>({ name: '', protocols: 'OpenFlow13', controller: '', connectController: false });
   const [hostForm, setHostForm] = useState<CreateHostForm>({ name: '', ip: '', gateway: '' });
+  const [routerForm, setRouterForm] = useState<CreateRouterForm>({ name: '' });
 
   // ── Toast ──
   const flash = useCallback((msg: string, type: 'ok' | 'err' = 'ok') => {
@@ -213,8 +224,48 @@ export default function TopologyPage() {
     onError: (e: any) => flash(e?.response?.data?.detail ?? 'Failed to delete host', 'err'),
   });
 
+  const createRouterMut = useMutation({
+    mutationFn: (data: { name: string; x?: number; y?: number }) => createRouter(data),
+    onSuccess: (r, vars) => {
+      qc.setQueryData(['topology'], (old: Topology | undefined) => {
+        if (!old) return old;
+        const routerId = `vrouter-${vars.name}`;
+        if (old.nodes.some(n => n.id === routerId)) return old;
+        return {
+          ...old,
+          nodes: [...old.nodes, {
+            id: routerId, type: 'router' as const, name: vars.name,
+            dpid: null, metadata: { x: vars.x ?? 400, y: vars.y ?? 300, ip_forward: true },
+          }],
+        };
+      });
+      qc.invalidateQueries({ queryKey: ['topology'] });
+      flash(r.data.message);
+    },
+    onError: (e: any) => flash(e?.response?.data?.detail ?? 'Failed to create router', 'err'),
+  });
+
+  const deleteRouterMut = useMutation({
+    mutationFn: (name: string) => deleteRouter(name),
+    onSuccess: (r, deletedName) => {
+      qc.setQueryData(['topology'], (old: Topology | undefined) => {
+        if (!old) return old;
+        const removedIds = new Set(old.nodes.filter(n => n.name === deletedName && n.type === 'router').map(n => n.id));
+        return {
+          ...old,
+          nodes: old.nodes.filter(n => !removedIds.has(n.id)),
+          links: old.links.filter(l => !removedIds.has(l.source) && !removedIds.has(l.target)),
+        };
+      });
+      qc.invalidateQueries({ queryKey: ['topology'] });
+      flash(r.data.message);
+      setPropertiesNode(null);
+    },
+    onError: (e: any) => flash(e?.response?.data?.detail ?? 'Failed to delete router', 'err'),
+  });
+
   const createLinkMut = useMutation({
-    mutationFn: (data: { source_id: string; target_id: string; source_name: string; target_name: string }) =>
+    mutationFn: (data: { source_id: string; target_id: string; source_name: string; target_name: string; ip?: string }) =>
       createLink(data),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['topology'] });
@@ -281,6 +332,27 @@ export default function TopologyPage() {
     setMode('select');
   };
 
+  const handleCreateRouter = () => {
+    if (!routerForm.name.trim()) return;
+    createRouterMut.mutate({
+      name: routerForm.name.trim(),
+      x: pendingPosition?.x,
+      y: pendingPosition?.y,
+    });
+    setShowRouterDialog(false);
+    setRouterForm({ name: '' });
+    setPendingPosition(null);
+    setMode('select');
+  };
+
+  const handleCreateRouterLink = () => {
+    if (!pendingLinkData) return;
+    createLinkMut.mutate({ ...pendingLinkData, ip: linkIp || undefined });
+    setShowLinkIpDialog(false);
+    setPendingLinkData(null);
+    setLinkIp('');
+  };
+
   // ── Resize ──
   useEffect(() => {
     const container = containerRef.current;
@@ -303,6 +375,7 @@ export default function TopologyPage() {
       if ((e.key === 'Delete' || e.key === 'Backspace') && propertiesNode) {
         if (propertiesNode.type === 'switch') deleteSwitchMut.mutate(propertiesNode.name);
         else if (propertiesNode.type === 'host') deleteHostMut.mutate(propertiesNode.name.replace('-veth', ''));
+        else if (propertiesNode.type === 'router' && propertiesNode.id.startsWith('vrouter-')) deleteRouterMut.mutate(propertiesNode.name);
       }
     };
     window.addEventListener('keydown', handler);
@@ -361,6 +434,7 @@ export default function TopologyPage() {
       const m = modeRef.current;
       if (m === 'addSwitch') { setPendingPosition({ x: mx, y: my }); setShowSwitchDialog(true); }
       else if (m === 'addHost') { setPendingPosition({ x: mx, y: my }); setShowHostDialog(true); }
+      else if (m === 'addRouter') { setPendingPosition({ x: mx, y: my }); setShowRouterDialog(true); }
       else if (m === 'select') { setPropertiesNode(null); setLinkSource(null); }
     });
 
@@ -474,6 +548,8 @@ export default function TopologyPage() {
         } else if (d.type === 'host') {
           const hostName = d.name.replace('-veth', '');
           if (confirm(`Delete host "${hostName}"?`)) deleteHostMut.mutate(hostName);
+        } else if (d.type === 'router' && d.id.startsWith('vrouter-')) {
+          if (confirm(`Delete router "${d.name}"?`)) deleteRouterMut.mutate(d.name);
         } else {
           flash(`Cannot delete ${d.type} nodes from builder`, 'err');
         }
@@ -488,7 +564,18 @@ export default function TopologyPage() {
           nodeGs.selectAll('.select-ring').attr('opacity', 0);
           d3.select(event.currentTarget as Element).select('.select-ring').attr('opacity', 1);
         } else if (ls.id !== d.id) {
-          createLinkMut.mutate({ source_id: ls.id, target_id: d.id, source_name: ls.name, target_name: d.name });
+          // Detect router↔switch — prompt for interface IP
+          const srcIsRouter = ls.id.startsWith('vrouter-');
+          const tgtIsRouter = d.id.startsWith('vrouter-');
+          const srcIsSwitch = ls.id.startsWith('switch-');
+          const tgtIsSwitch = d.id.startsWith('switch-');
+
+          if ((srcIsRouter && tgtIsSwitch) || (srcIsSwitch && tgtIsRouter)) {
+            setPendingLinkData({ source_id: ls.id, target_id: d.id, source_name: ls.name, target_name: d.name });
+            setShowLinkIpDialog(true);
+          } else {
+            createLinkMut.mutate({ source_id: ls.id, target_id: d.id, source_name: ls.name, target_name: d.name });
+          }
           nodeGs.selectAll('.select-ring').attr('opacity', 0);
         }
         return;
@@ -584,18 +671,20 @@ export default function TopologyPage() {
     select: 'Click nodes to view properties · Drag to move · Scroll to zoom',
     addSwitch: 'Click on the canvas to place a new switch (OVS bridge)',
     addHost: 'Click on the canvas to place a new virtual host',
+    addRouter: 'Click on the canvas to place a new virtual router',
     addLink: linkSource ? `Click target node to link with "${linkSource.name}"` : 'Click a node as the link source, then click the target',
     delete: 'Click a node or link to delete it',
   };
 
   const modeColor: Record<BuilderMode, string> = {
-    select: '#64748b', addSwitch: '#3b82f6', addHost: '#a78bfa', addLink: '#f59e0b', delete: '#ef4444',
+    select: '#64748b', addSwitch: '#3b82f6', addHost: '#a78bfa', addRouter: '#22c55e', addLink: '#f59e0b', delete: '#ef4444',
   };
 
   const toolbarBtns: { mode: BuilderMode; icon: string; label: string; color: string }[] = [
     { mode: 'select', icon: '🖱', label: 'Select', color: '#64748b' },
     { mode: 'addSwitch', icon: '⬡', label: 'Add Switch', color: '#3b82f6' },
     { mode: 'addHost', icon: '◉', label: 'Add Host', color: '#a78bfa' },
+    { mode: 'addRouter', icon: '🔀', label: 'Add Router', color: '#22c55e' },
     { mode: 'addLink', icon: '🔗', label: 'Add Link', color: '#f59e0b' },
     { mode: 'delete', icon: '🗑', label: 'Delete', color: '#ef4444' },
   ];
@@ -695,7 +784,7 @@ export default function TopologyPage() {
           style={{
             flex: 1, position: 'relative', background: 'var(--color-bg-card)', border: '1px solid var(--color-border)',
             borderRadius: 12, overflow: 'hidden', minHeight: 720,
-            cursor: mode === 'addSwitch' || mode === 'addHost' ? 'crosshair' : mode === 'delete' ? 'not-allowed' : 'default',
+            cursor: mode === 'addSwitch' || mode === 'addHost' || mode === 'addRouter' ? 'crosshair' : mode === 'delete' ? 'not-allowed' : 'default',
           }}>
           {/* Grid */}
           <div style={{ position: 'absolute', inset: 0, backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(255,255,255,0.03) 1px, transparent 0)', backgroundSize: '30px 30px', pointerEvents: 'none' }} />
@@ -704,6 +793,7 @@ export default function TopologyPage() {
             <div style={{ position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)', padding: '6px 18px', borderRadius: 20, fontSize: 12, fontWeight: 600, background: modeColor[mode] + '20', border: `1px solid ${modeColor[mode]}44`, color: modeColor[mode], zIndex: 10, backdropFilter: 'blur(8px)', whiteSpace: 'nowrap' }}>
               {mode === 'addSwitch' && '🔨 Click canvas to place Switch'}
               {mode === 'addHost' && '🔨 Click canvas to place Host'}
+              {mode === 'addRouter' && '🔨 Click canvas to place Router'}
               {mode === 'addLink' && (linkSource ? `🔗 Click target → link with "${linkSource.name}"` : '🔗 Click source node')}
               {mode === 'delete' && '🗑️ Click a node or link to delete'}
             </div>
@@ -799,14 +889,15 @@ export default function TopologyPage() {
                 )}
               </div>
               {/* Delete button */}
-              {(propertiesNode.type === 'switch' || propertiesNode.type === 'host') && (
+              {(propertiesNode.type === 'switch' || propertiesNode.type === 'host' || (propertiesNode.type === 'router' && propertiesNode.id.startsWith('vrouter-'))) && (
                 <div style={{ marginTop: 16 }}>
                   <button
                     onClick={() => {
                       const name = propertiesNode.type === 'host' ? propertiesNode.name.replace('-veth', '') : propertiesNode.name;
                       if (confirm(`Delete ${propertiesNode.type} "${name}"?`)) {
                         if (propertiesNode.type === 'switch') deleteSwitchMut.mutate(name);
-                        else deleteHostMut.mutate(name);
+                        else if (propertiesNode.type === 'host') deleteHostMut.mutate(name);
+                        else deleteRouterMut.mutate(name);
                       }
                     }}
                     style={{ width: '100%', padding: '8px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600, cursor: 'pointer', background: '#ef444420', border: '1px solid #ef444444', color: '#ef4444' }}>
@@ -928,6 +1019,67 @@ export default function TopologyPage() {
               disabled={!hostForm.name.trim() || createHostMut.isPending}
               style={{ ...primaryBtnStyle, background: '#a78bfa', opacity: !hostForm.name.trim() ? 0.4 : 1 }}>
               {createHostMut.isPending ? 'Creating…' : 'Create Host'}
+            </button>
+          </div>
+        </DialogOverlay>
+      )}
+
+      {/* Create Router Dialog */}
+      {showRouterDialog && (
+        <DialogOverlay onClose={() => { setShowRouterDialog(false); setPendingPosition(null); }}>
+          <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>
+            <span style={{ color: '#22c55e' }}>🔀</span> Create Virtual Router
+          </h3>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 16, padding: '8px 12px', background: 'rgba(34,197,94,0.08)', borderRadius: 8, border: '1px solid rgba(34,197,94,0.2)', lineHeight: 1.6 }}>
+            Creates a Linux network namespace with <strong>IP forwarding enabled</strong>.<br />
+            Link the router to switches — each link creates a separate interface with its own IP.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <FieldLabel label="Router Name *">
+              <input autoFocus value={routerForm.name}
+                onChange={(e) => setRouterForm({ ...routerForm, name: e.target.value })}
+                placeholder="e.g. router1" style={inputStyle}
+                onKeyDown={(e) => e.key === 'Enter' && handleCreateRouter()} />
+            </FieldLabel>
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 20, justifyContent: 'flex-end' }}>
+            <button onClick={() => { setShowRouterDialog(false); setPendingPosition(null); }} style={cancelBtnStyle}>Cancel</button>
+            <button onClick={handleCreateRouter}
+              disabled={!routerForm.name.trim() || createRouterMut.isPending}
+              style={{ ...primaryBtnStyle, background: '#22c55e', opacity: !routerForm.name.trim() ? 0.4 : 1 }}>
+              {createRouterMut.isPending ? 'Creating…' : 'Create Router'}
+            </button>
+          </div>
+        </DialogOverlay>
+      )}
+
+      {/* Router Link IP Dialog */}
+      {showLinkIpDialog && pendingLinkData && (
+        <DialogOverlay onClose={() => { setShowLinkIpDialog(false); setPendingLinkData(null); setLinkIp(''); setLinkSource(null); }}>
+          <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>
+            <span style={{ color: '#22c55e' }}>🔗</span> Router Interface Configuration
+          </h3>
+          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginBottom: 16, lineHeight: 1.6 }}>
+            Linking <strong style={{ color: '#22c55e' }}>{pendingLinkData.source_name}</strong> ↔ <strong style={{ color: '#3b82f6' }}>{pendingLinkData.target_name}</strong><br />
+            A new veth interface will be created on the router. Assign its IP below.
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <FieldLabel label="Router Interface IP (CIDR)">
+              <input autoFocus value={linkIp}
+                onChange={(e) => setLinkIp(e.target.value)}
+                placeholder="e.g. 10.0.0.1/24" style={inputStyle}
+                onKeyDown={(e) => e.key === 'Enter' && handleCreateRouterLink()} />
+            </FieldLabel>
+            <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+              Leave empty to create the link without an IP (can be configured later via CLI)
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 20, justifyContent: 'flex-end' }}>
+            <button onClick={() => { setShowLinkIpDialog(false); setPendingLinkData(null); setLinkIp(''); setLinkSource(null); }} style={cancelBtnStyle}>Cancel</button>
+            <button onClick={handleCreateRouterLink}
+              disabled={createLinkMut.isPending}
+              style={{ ...primaryBtnStyle, background: '#22c55e' }}>
+              {createLinkMut.isPending ? 'Creating…' : 'Create Link'}
             </button>
           </div>
         </DialogOverlay>
