@@ -847,13 +847,15 @@ export default function TopologyPage() {
       {topology.isError && <ErrorBanner message="Failed to load topology data." />}
 
       {/* Main: Graph + Properties */}
-      <div style={{ display: 'flex', gap: 16 }}>
+      <div style={{ display: 'flex', gap: 0, position: 'relative' }}>
         {/* Canvas */}
         <div ref={containerRef} className="fade-in"
           style={{
             flex: 1, position: 'relative', background: 'var(--color-bg-card)', border: '1px solid var(--color-border)',
             borderRadius: 12, overflow: 'hidden', minHeight: 720,
             cursor: mode === 'addSwitch' || mode === 'addHost' || mode === 'addRouter' ? 'crosshair' : mode === 'delete' ? 'not-allowed' : 'default',
+            transition: 'margin-right 0.3s cubic-bezier(0.4,0,0.2,1)',
+            marginRight: propertiesNode ? 296 : 0,
           }}>
           {/* Grid */}
           <div style={{ position: 'absolute', inset: 0, backgroundImage: 'radial-gradient(circle at 1px 1px, rgba(255,255,255,0.03) 1px, transparent 0)', backgroundSize: '30px 30px', pointerEvents: 'none' }} />
@@ -950,15 +952,28 @@ export default function TopologyPage() {
           </div>
         </div>
 
-        {/* Properties Panel */}
-        <div style={{ width: 280, flexShrink: 0, background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', borderRadius: 12, padding: 16, overflow: 'auto', maxHeight: 720 }}>
-          <h3 style={{ fontSize: 14, fontWeight: 700, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>📋 Properties</h3>
-          {!propertiesNode ? (
-            <div style={{ color: 'var(--color-text-muted)', fontSize: 12, textAlign: 'center', padding: '40px 0' }}>
-              <div style={{ fontSize: 32, marginBottom: 8, opacity: 0.3 }}>🔍</div>
-              Select a node to view its properties
-            </div>
-          ) : (
+        {/* Properties Panel — slides in from right */}
+        <div style={{
+          position: 'absolute', top: 0, right: 0, width: 280, maxHeight: 720,
+          background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', borderRadius: 12,
+          padding: 16, overflow: 'auto',
+          transform: propertiesNode ? 'translateX(0)' : 'translateX(calc(100% + 16px))',
+          opacity: propertiesNode ? 1 : 0,
+          transition: 'transform 0.3s cubic-bezier(0.4,0,0.2,1), opacity 0.3s cubic-bezier(0.4,0,0.2,1)',
+          pointerEvents: propertiesNode ? 'auto' : 'none',
+          zIndex: 5,
+        }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
+            <h3 style={{ fontSize: 14, fontWeight: 700, margin: 0, display: 'flex', alignItems: 'center', gap: 6 }}>📋 Properties</h3>
+            <button
+              onClick={() => setPropertiesNode(null)}
+              style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer', fontSize: 16, padding: '2px 6px', borderRadius: 4, lineHeight: 1 }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--color-text)'; e.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--color-text-muted)'; e.currentTarget.style.background = 'none'; }}
+              title="Close"
+            >✕</button>
+          </div>
+          {propertiesNode && (
             <div style={{ fontSize: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 16, padding: '10px 12px', background: (NODE_COLORS[propertiesNode.type] ?? '#94a3b8') + '15', borderRadius: 8, border: `1px solid ${NODE_COLORS[propertiesNode.type] ?? '#94a3b8'}33` }}>
                 <span style={{ fontSize: 22 }}>{NODE_LABELS[propertiesNode.type] ?? '●'}</span>
