@@ -793,6 +793,1014 @@ export const labs: Lab[] = [
       },
     ],
   },
+
+  // ─── LAB 7: BGP Basics — First iBGP Peering ──────────────────
+  {
+    id: 'lab-07-bgp-ibgp-basics',
+    title: 'Lab 7: BGP Basics — Your First iBGP Peering',
+    description: 'Learn the fundamentals of BGP by establishing an iBGP session between two routers in the same AS. Understand BGP states, keepalives, and route advertisement.',
+    difficulty: 'intermediate',
+    duration: '25 min',
+    icon: '🌐',
+    tags: ['BGP', 'iBGP', 'FRR', 'Routing', 'AS'],
+    objectives: [
+      'Understand the difference between IGP and EGP',
+      'Create two FRR routers in the same AS',
+      'Configure iBGP peering between them',
+      'Observe BGP neighbor states (Idle → Active → OpenSent → Established)',
+      'Advertise and verify routes via BGP',
+    ],
+    prerequisites: ['Completed Labs 1-2', 'Understanding of IP addressing'],
+    topology: `
+         AS 65001
+    ┌─────────────────────────────────┐
+    │                                 │
+    │  ┌──────┐     ┌──────┐         │
+    │  │  R1  ├─────┤  R2  │         │
+    │  │.1/24 │     │.2/24 │         │
+    │  └──┬───┘     └───┬──┘         │
+    │     │             │             │
+    │  ┌──┴───┐     ┌───┴──┐         │
+    │  │  h1  │     │  h2  │         │
+    │  │.10/24│     │.20/24│         │
+    │  └──────┘     └──────┘         │
+    │       10.0.0.0/24              │
+    └─────────────────────────────────┘`,
+    steps: [
+      {
+        title: 'What is BGP?',
+        description: 'BGP (Border Gateway Protocol) is the routing protocol that holds the Internet together. It\'s how Autonomous Systems (AS) exchange routing information.\n\n• **iBGP** — BGP between routers in the **same** AS\n• **eBGP** — BGP between routers in **different** ASes\n• Uses TCP port 179\n• Path-vector protocol — carries full AS path\n• BGP states: Idle → Connect → Active → OpenSent → OpenConfirm → Established',
+        instructions: [
+          'In this lab, we\'ll start with iBGP (same AS)',
+          'Two routers in AS 65001 will peer with each other',
+          'Each router has a host behind it',
+          'Goal: hosts reach each other via BGP-learned routes',
+        ],
+        where: 'info',
+        tip: 'BGP is different from OSPF — BGP doesn\'t discover neighbors automatically. You must explicitly configure each peer.',
+      },
+      {
+        title: 'Create Router R1',
+        description: 'Create the first FRR router in the topology.',
+        instructions: [
+          'Go to Topology → Canvas',
+          'Click "Add Router (🔀)" in the toolbar',
+          'Click on the left side of the canvas',
+          'Name: router1',
+          'Click "Create Router"',
+        ],
+        where: 'builder',
+        verify: 'Green diamond "router1" appears on the canvas.',
+      },
+      {
+        title: 'Create Router R2',
+        description: 'Create the second router.',
+        instructions: [
+          'Click "Add Router (🔀)" again',
+          'Click on the right side of the canvas',
+          'Name: router2',
+          'Click "Create Router"',
+        ],
+        where: 'builder',
+        verify: 'Green diamond "router2" appears.',
+      },
+      {
+        title: 'Create Hosts',
+        description: 'Create two hosts — one behind each router.',
+        instructions: [
+          'Create h1 (IP: 10.0.1.10/24, Gateway: 10.0.1.1) → link to router1',
+          'Create h2 (IP: 10.0.2.10/24, Gateway: 10.0.2.1) → link to router2',
+        ],
+        where: 'builder',
+        verify: 'h1 linked to router1, h2 linked to router2.',
+      },
+      {
+        title: 'Connect Routers & Create Switch',
+        description: 'Connect the two routers through a switch so they can exchange BGP messages.',
+        instructions: [
+          'Create sw1 (standalone mode)',
+          'Link router1 → sw1 (set router1 interface IP: 10.0.0.1/24)',
+          'Link router2 → sw1 (set router2 interface IP: 10.0.0.2/24)',
+        ],
+        where: 'builder',
+        verify: 'Both routers connected to sw1. router1 has 10.0.0.1/24, router2 has 10.0.0.2/24.',
+        tip: 'The router-to-switch links need IP addresses. This is the network where BGP peering will happen.',
+      },
+      {
+        title: 'Verify Router Connectivity',
+        description: 'Before configuring BGP, make sure the routers can reach each other.',
+        instructions: [
+          'Open router1\'s terminal (right-click → Open CLI Terminal)',
+          'Ping router2\'s IP to verify connectivity',
+        ],
+        commands: [
+          '# From router1, ping router2',
+          'ping -c 3 10.0.0.2',
+        ],
+        where: 'cli',
+        verify: 'Ping should succeed with 0% packet loss.',
+        tip: 'If ping fails, check that the router interfaces are up and IP addresses are correct.',
+      },
+      {
+        title: 'Configure BGP on Router1',
+        description: 'Enter FRR\'s vtysh shell in router1 and configure BGP. We\'ll set AS 65001 and peer with router2.',
+        instructions: [
+          'Open router1\'s CLI terminal',
+          'Enter vtysh, then configure BGP',
+        ],
+        commands: [
+          '# Enter FRR shell',
+          'vtysh',
+          '',
+          '# Enter configuration mode',
+          'configure terminal',
+          '',
+          '# Start BGP process with AS number 65001',
+          'router bgp 65001',
+          '',
+          '# Set router-id',
+          'bgp router-id 10.0.0.1',
+          '',
+          '# Add iBGP neighbor (router2)',
+          'neighbor 10.0.0.2 remote-as 65001',
+          'neighbor 10.0.0.2 description Router2-iBGP',
+          '',
+          '# Advertise connected networks',
+          'address-family ipv4 unicast',
+          'network 10.0.1.0/24',
+          'network 10.0.0.0/24',
+          'exit-address-family',
+          '',
+          '# Save and exit',
+          'end',
+          'write memory',
+        ],
+        where: 'cli',
+        verify: 'Configuration saved. No errors in output.',
+        tip: 'In iBGP, the remote-as is the SAME as your local AS. In eBGP it would be different.',
+      },
+      {
+        title: 'Configure BGP on Router2',
+        description: 'Same configuration on router2, but mirrored.',
+        instructions: [
+          'Open router2\'s CLI terminal',
+          'Configure BGP to peer with router1',
+        ],
+        commands: [
+          'vtysh',
+          'configure terminal',
+          'router bgp 65001',
+          'bgp router-id 10.0.0.2',
+          'neighbor 10.0.0.1 remote-as 65001',
+          'neighbor 10.0.0.1 description Router1-iBGP',
+          'address-family ipv4 unicast',
+          'network 10.0.2.0/24',
+          'network 10.0.0.0/24',
+          'exit-address-family',
+          'end',
+          'write memory',
+        ],
+        where: 'cli',
+        verify: 'Configuration saved successfully.',
+      },
+      {
+        title: 'Verify BGP Session',
+        description: 'Check that the BGP session is Established between both routers.',
+        instructions: [
+          'On router1, check the BGP summary and neighbor details',
+        ],
+        commands: [
+          '# Check BGP summary',
+          'vtysh -c "show ip bgp summary"',
+          '',
+          '# Check neighbor details',
+          'vtysh -c "show ip bgp neighbors 10.0.0.2"',
+          '',
+          '# Check received routes',
+          'vtysh -c "show ip bgp"',
+        ],
+        where: 'cli',
+        verify: 'Neighbor 10.0.0.2 should show state "Established". You should see routes in the BGP table.',
+        tip: 'BGP session might take 30-60 seconds to establish. If stuck in "Active" state, check connectivity and AS numbers.',
+      },
+      {
+        title: 'Verify in NetOrch UI',
+        description: 'Check the BGP summary in the NetOrch dashboard.',
+        instructions: [
+          'Go to the Router Management page',
+          'Check the BGP Neighbors section',
+          'You should see the peering with state "Established"',
+        ],
+        where: 'browser',
+        verify: 'BGP neighbor shows up with Established state.',
+      },
+      {
+        title: 'Test End-to-End Connectivity',
+        description: 'The ultimate test — can h1 ping h2 through the BGP-learned routes?',
+        instructions: [
+          'Ping from h1 to h2 through the routers',
+        ],
+        commands: [
+          '# From the VM bash (not vtysh)',
+          'ip netns exec h1 ping -c 3 10.0.2.10',
+          '',
+          '# Check the routing table on router1',
+          'ip netns exec router1 vtysh -c "show ip route"',
+        ],
+        where: 'cli',
+        verify: 'Ping from h1 to h2 succeeds. Route table shows 10.0.2.0/24 learned via BGP.',
+        tip: 'The route to 10.0.2.0/24 should show "B>" (BGP best route) in the routing table.',
+      },
+      {
+        title: '🎉 Lab Complete!',
+        description: 'You\'ve established your first BGP session! Both routers in AS 65001 are exchanging routes via iBGP, and hosts can communicate through BGP-learned paths.',
+        instructions: [
+          'Key concepts learned:',
+          '• BGP uses TCP port 179 for peering',
+          '• iBGP = same AS number on both sides',
+          '• BGP neighbor must be explicitly configured',
+          '• "network" command advertises prefixes to peers',
+          '• States: Idle → Active → OpenSent → Established',
+          '• "show ip bgp summary" shows peering status',
+          'Next: Lab 8 — eBGP between different ASes!',
+        ],
+        where: 'info',
+      },
+    ],
+  },
+
+  // ─── LAB 8: eBGP Peering Between Two ASes ────────────────────
+  {
+    id: 'lab-08-ebgp-peering',
+    title: 'Lab 8: eBGP — Peering Between Two ASes',
+    description: 'Configure eBGP between routers in different Autonomous Systems. Learn about eBGP multihop, next-hop-self, and how the Internet\'s inter-domain routing works.',
+    difficulty: 'intermediate',
+    duration: '30 min',
+    icon: '🌍',
+    tags: ['BGP', 'eBGP', 'AS', 'Inter-domain', 'next-hop-self'],
+    objectives: [
+      'Create routers in different Autonomous Systems',
+      'Configure eBGP peering across AS boundaries',
+      'Understand eBGP vs iBGP differences (TTL, next-hop behavior)',
+      'Use next-hop-self for iBGP route redistribution',
+      'Trace the AS path in BGP routes',
+    ],
+    prerequisites: ['Completed Lab 7 (iBGP basics)'],
+    topology: `
+      AS 65001                         AS 65002
+    ┌───────────────┐              ┌───────────────┐
+    │               │              │               │
+    │  ┌──────┐     │  10.0.0.0/24 │     ┌──────┐  │
+    │  │  h1  │     │              │     │  h2  │  │
+    │  │.10   │     │              │     │.10   │  │
+    │  └──┬───┘     │              │     └──┬───┘  │
+    │     │ .0/24   │              │   .0/24│      │
+    │  ┌──┴───┐     │     eBGP     │  ┌────┴──┐   │
+    │  │  R1  ├─────┼──────────────┼──┤  R2   │   │
+    │  │.1    │     │              │  │.2     │   │
+    │  └──────┘     │              │  └───────┘   │
+    │               │              │               │
+    └───────────────┘              └───────────────┘`,
+    steps: [
+      {
+        title: 'eBGP vs iBGP — What\'s Different?',
+        description: 'When BGP peers are in **different** ASes, the session is called **eBGP** (external BGP). Key differences:\n\n• **TTL:** eBGP defaults to TTL=1 (directly connected), iBGP has no limit\n• **Next-hop:** eBGP changes next-hop to self, iBGP preserves original next-hop\n• **AS Path:** eBGP prepends local AS to outgoing routes\n• **Loop prevention:** eBGP rejects routes containing own AS in path\n• **Admin distance:** eBGP routes (AD=20) preferred over iBGP (AD=200)',
+        instructions: [
+          'In this lab, we\'ll set up 2 ASes with 1 router each',
+          'R1 in AS 65001, R2 in AS 65002',
+          'eBGP peering on a shared /24 network',
+          'Each AS has a host behind its router',
+        ],
+        where: 'info',
+        tip: 'On the real Internet, eBGP is how ISPs, companies, and cloud providers exchange routes with each other.',
+      },
+      {
+        title: 'Build the Topology',
+        description: 'Create 2 routers, 2 hosts, and a connecting switch.',
+        instructions: [
+          'Create router1 (R1 — AS 65001)',
+          'Create router2 (R2 — AS 65002)',
+          'Create sw1 (standalone) and connect both routers to it',
+          'Set router1→sw1 IP: 10.0.0.1/24',
+          'Set router2→sw1 IP: 10.0.0.2/24',
+          'Create h1 (10.0.1.10/24, gw 10.0.1.1) → link to router1',
+          'Create h2 (10.0.2.10/24, gw 10.0.2.1) → link to router2',
+        ],
+        where: 'builder',
+        verify: 'Topology: h1 ↔ router1 ↔ sw1 ↔ router2 ↔ h2',
+      },
+      {
+        title: 'Configure eBGP on R1 (AS 65001)',
+        description: 'Configure BGP on router1 with AS 65001. The key difference from Lab 7: the neighbor has a **different** AS number.',
+        instructions: [
+          'Open router1 CLI terminal',
+          'Configure BGP with eBGP peer',
+        ],
+        commands: [
+          'vtysh',
+          'configure terminal',
+          'router bgp 65001',
+          'bgp router-id 10.0.0.1',
+          '',
+          '# eBGP peer — note different AS number!',
+          'neighbor 10.0.0.2 remote-as 65002',
+          'neighbor 10.0.0.2 description R2-eBGP',
+          '',
+          'address-family ipv4 unicast',
+          'network 10.0.1.0/24',
+          'network 10.0.0.0/24',
+          'exit-address-family',
+          'end',
+          'write memory',
+        ],
+        where: 'cli',
+        verify: 'No errors. Config saved.',
+        tip: 'The remote-as is 65002 (not 65001) — this makes it eBGP instead of iBGP.',
+      },
+      {
+        title: 'Configure eBGP on R2 (AS 65002)',
+        description: 'Mirror configuration on router2 with AS 65002.',
+        commands: [
+          'vtysh',
+          'configure terminal',
+          'router bgp 65002',
+          'bgp router-id 10.0.0.2',
+          '',
+          '# eBGP peer pointing back to R1',
+          'neighbor 10.0.0.1 remote-as 65001',
+          'neighbor 10.0.0.1 description R1-eBGP',
+          '',
+          'address-family ipv4 unicast',
+          'network 10.0.2.0/24',
+          'network 10.0.0.0/24',
+          'exit-address-family',
+          'end',
+          'write memory',
+        ],
+        instructions: [
+          'Open router2 CLI terminal',
+          'Configure AS 65002 and peer with R1',
+        ],
+        where: 'cli',
+        verify: 'Config saved. BGP should start establishing.',
+      },
+      {
+        title: 'Verify eBGP Session & AS Path',
+        description: 'Check the BGP session and examine the AS path — this is the key difference from iBGP.',
+        instructions: [
+          'On router1, check the BGP table and observe AS path',
+        ],
+        commands: [
+          '# BGP summary — check state',
+          'vtysh -c "show ip bgp summary"',
+          '',
+          '# Full BGP table — look at AS_PATH column',
+          'vtysh -c "show ip bgp"',
+          '',
+          '# Detailed route info for R2\'s network',
+          'vtysh -c "show ip bgp 10.0.2.0/24"',
+        ],
+        where: 'cli',
+        verify: 'Session Established. Route 10.0.2.0/24 shows AS path "65002". This means the route came from AS 65002.',
+        tip: 'In iBGP (Lab 7), the AS path was empty because both routers were in the same AS. In eBGP, each AS prepends its own number.',
+      },
+      {
+        title: 'Test End-to-End & Traceroute',
+        description: 'Verify hosts can communicate across AS boundaries and trace the path.',
+        commands: [
+          '# Ping from h1 to h2 (cross-AS)',
+          'ip netns exec h1 ping -c 3 10.0.2.10',
+          '',
+          '# Traceroute to see the path',
+          'ip netns exec h1 traceroute -n 10.0.2.10',
+          '',
+          '# Check routing table on R1',
+          'ip netns exec router1 vtysh -c "show ip route"',
+        ],
+        instructions: [
+          'Test cross-AS connectivity with ping',
+          'Use traceroute to verify the path',
+        ],
+        where: 'cli',
+        verify: 'Ping succeeds. Traceroute shows hops: 10.0.1.1 (R1) → 10.0.0.2 (R2) → 10.0.2.10 (h2).',
+      },
+      {
+        title: '🎉 Lab Complete!',
+        description: 'You\'ve set up eBGP between two Autonomous Systems! This is exactly how ISPs and large networks connect on the Internet.',
+        instructions: [
+          'Key concepts learned:',
+          '• eBGP = different AS numbers → inter-domain routing',
+          '• AS path records which ASes a route has traversed',
+          '• eBGP changes next-hop to the advertising router\'s IP',
+          '• Administrative Distance: eBGP (20) < iBGP (200)',
+          '• AS path is used for loop prevention (reject own AS)',
+          'Next: Lab 9 — BGP Route Filtering!',
+        ],
+        where: 'info',
+      },
+    ],
+  },
+
+  // ─── LAB 9: BGP Route Filtering with Prefix Lists ────────────
+  {
+    id: 'lab-09-bgp-prefix-filter',
+    title: 'Lab 9: BGP Route Filtering — Prefix Lists',
+    description: 'Control which routes are advertised or accepted using prefix lists and route maps. This is fundamental for BGP security and policy.',
+    difficulty: 'advanced',
+    duration: '30 min',
+    icon: '🛡️',
+    tags: ['BGP', 'Prefix List', 'Route Map', 'Filtering', 'Security'],
+    objectives: [
+      'Create prefix lists to match specific networks',
+      'Apply inbound and outbound filters to BGP neighbors',
+      'Use route maps for complex filtering policies',
+      'Verify filtered vs. accepted routes',
+      'Understand why route filtering is critical for Internet security',
+    ],
+    prerequisites: ['Completed Lab 8 (eBGP)'],
+    topology: `
+      AS 65001                              AS 65002
+    ┌───────────────┐                   ┌───────────────────┐
+    │               │                   │  10.0.2.0/24 (OK) │
+    │  ┌──────┐     │      eBGP        │  10.0.3.0/24 (OK) │
+    │  │  R1  ├─────┼──────────────────┼──┤  R2             │
+    │  │65001 │     │                   │  10.99.0.0/24 (✗) │
+    │  └──────┘     │   prefix-list     │  ← BLOCKED!      │
+    │               │   filters here    │                   │
+    └───────────────┘                   └───────────────────┘`,
+    steps: [
+      {
+        title: 'Why Filter BGP Routes?',
+        description: 'On the Internet, BGP route filtering is **critical**:\n\n• **Without filters:** a misconfigured router could announce routes for networks it doesn\'t own (route hijacking)\n• **Prefix lists:** match routes by network address and mask length\n• **Route maps:** combine multiple conditions and set attributes\n• **Inbound filter:** controls what routes you accept FROM a peer\n• **Outbound filter:** controls what routes you advertise TO a peer\n\nReal-world example: In 2018, a BGP leak by a small ISP caused Google traffic to be routed through Russia and China for over an hour.',
+        instructions: [
+          'We\'ll build on the eBGP topology from Lab 8',
+          'R2 will advertise 3 networks (2 legitimate + 1 bogus)',
+          'R1 will use a prefix list to block the bogus route',
+          'This simulates real-world BGP filtering',
+        ],
+        where: 'info',
+        tip: 'Every ISP uses prefix lists. Without them, the Internet would be chaos.',
+      },
+      {
+        title: 'Build the Topology',
+        description: 'Create the same two-router eBGP topology from Lab 8.',
+        instructions: [
+          'Create router1, router2, sw1',
+          'router1→sw1: 10.0.0.1/24',
+          'router2→sw1: 10.0.0.2/24',
+          'Configure eBGP: R1 AS 65001, R2 AS 65002 (same as Lab 8)',
+        ],
+        commands: [
+          '# R1: AS 65001',
+          'ip netns exec router1 vtysh -c "configure terminal" -c "router bgp 65001" -c "bgp router-id 10.0.0.1" -c "neighbor 10.0.0.2 remote-as 65002" -c "address-family ipv4 unicast" -c "network 10.0.1.0/24" -c "exit-address-family" -c "end" -c "write memory"',
+          '',
+          '# R2: AS 65002 — advertise 3 networks (1 will be "bogus")',
+          'ip netns exec router2 vtysh -c "configure terminal" -c "router bgp 65002" -c "bgp router-id 10.0.0.2" -c "neighbor 10.0.0.1 remote-as 65001" -c "address-family ipv4 unicast" -c "network 10.0.2.0/24" -c "network 10.0.3.0/24" -c "network 10.99.0.0/24" -c "exit-address-family" -c "end" -c "write memory"',
+        ],
+        where: 'cli',
+        verify: 'Both routers configured. R2 advertises three /24 networks.',
+      },
+      {
+        title: 'Verify — R1 Receives All Routes (No Filter)',
+        description: 'Before applying any filter, check that R1 receives all 3 routes from R2.',
+        commands: [
+          '# Check BGP table on R1',
+          'ip netns exec router1 vtysh -c "show ip bgp"',
+          '',
+          '# You should see all 3 routes from R2:',
+          '# 10.0.2.0/24  via 10.0.0.2 (AS 65002)',
+          '# 10.0.3.0/24  via 10.0.0.2 (AS 65002)',
+          '# 10.99.0.0/24 via 10.0.0.2 (AS 65002) ← bogus!',
+        ],
+        instructions: [
+          'Check that R1 has received all 3 routes',
+          'The 10.99.0.0/24 route is the one we want to block',
+        ],
+        where: 'cli',
+        verify: 'R1 shows all 3 routes from AS 65002 in its BGP table.',
+        tip: 'Without filtering, R1 trusts everything R2 advertises — this is dangerous!',
+      },
+      {
+        title: 'Create a Prefix List on R1',
+        description: 'A prefix list is a named set of rules that match IP prefixes. We\'ll create one that permits only 10.0.2.0/24 and 10.0.3.0/24, and denies everything else.',
+        commands: [
+          'ip netns exec router1 vtysh',
+          'configure terminal',
+          '',
+          '# Create prefix list — order matters! (seq number)',
+          'ip prefix-list ALLOWED-FROM-R2 seq 10 permit 10.0.2.0/24',
+          'ip prefix-list ALLOWED-FROM-R2 seq 20 permit 10.0.3.0/24',
+          '# Implicit deny all at the end!',
+          '',
+          'end',
+          'write memory',
+        ],
+        instructions: [
+          'Enter vtysh on router1',
+          'Create a prefix list named "ALLOWED-FROM-R2"',
+          'Permit only the legitimate networks',
+        ],
+        where: 'cli',
+        verify: 'Prefix list created. No errors.',
+        tip: 'Prefix lists have an implicit "deny all" at the end — anything not explicitly permitted is denied.',
+      },
+      {
+        title: 'Apply the Prefix List to BGP Neighbor',
+        description: 'Apply the prefix list as an inbound filter on the neighbor 10.0.0.2 (R2).',
+        commands: [
+          'ip netns exec router1 vtysh',
+          'configure terminal',
+          'router bgp 65001',
+          '',
+          'address-family ipv4 unicast',
+          '# Apply prefix list on inbound routes from R2',
+          'neighbor 10.0.0.2 prefix-list ALLOWED-FROM-R2 in',
+          'exit-address-family',
+          '',
+          'end',
+          'write memory',
+          '',
+          '# Clear BGP session to re-evaluate routes',
+          'clear ip bgp 10.0.0.2 soft in',
+        ],
+        instructions: [
+          'Apply the prefix list as an inbound filter',
+          'Soft-clear the BGP session to apply immediately',
+        ],
+        where: 'cli',
+        verify: 'Filter applied. BGP session soft-cleared.',
+        tip: '"soft in" re-processes received routes without tearing down the BGP session.',
+      },
+      {
+        title: 'Verify — Bogus Route is Blocked!',
+        description: 'Now check the BGP table on R1 — the 10.99.0.0/24 route should be gone.',
+        commands: [
+          '# Check BGP table',
+          'ip netns exec router1 vtysh -c "show ip bgp"',
+          '',
+          '# Check specific bogus route — should be rejected',
+          'ip netns exec router1 vtysh -c "show ip bgp 10.99.0.0/24"',
+          '',
+          '# Show prefix list hit counters',
+          'ip netns exec router1 vtysh -c "show ip prefix-list ALLOWED-FROM-R2"',
+        ],
+        instructions: [
+          'Check the BGP table — 10.99.0.0/24 should be gone',
+          'Verify the prefix list counters show hits',
+        ],
+        where: 'cli',
+        verify: 'Only 10.0.2.0/24 and 10.0.3.0/24 remain. 10.99.0.0/24 is filtered out!',
+      },
+      {
+        title: '🎉 Lab Complete!',
+        description: 'You\'ve implemented BGP route filtering! This is exactly how ISPs protect themselves from route hijacks and leaks.',
+        instructions: [
+          'Key concepts learned:',
+          '• Prefix lists match routes by network/mask',
+          '• "permit" allows, "deny" blocks, implicit deny at end',
+          '• Apply with "neighbor X prefix-list NAME in/out"',
+          '• "clear ip bgp X soft in" re-applies without session reset',
+          '• Route filtering is CRITICAL for BGP security',
+          '• Real ISPs filter based on IRR/RPKI databases',
+          'Next: Lab 10 — BGP Path Attributes & Route Selection!',
+        ],
+        where: 'info',
+      },
+    ],
+  },
+
+  // ─── LAB 10: BGP Path Attributes & Route Selection ───────────
+  {
+    id: 'lab-10-bgp-path-attributes',
+    title: 'Lab 10: BGP Path Attributes & Best Path Selection',
+    description: 'Understand how BGP selects the best path when multiple routes exist. Learn about Local Preference, AS Path Prepending, MED, and the BGP decision process.',
+    difficulty: 'advanced',
+    duration: '35 min',
+    icon: '🏆',
+    tags: ['BGP', 'Local Preference', 'AS Path Prepend', 'MED', 'Best Path'],
+    objectives: [
+      'Understand the BGP best path selection algorithm',
+      'Use Local Preference to influence outbound traffic',
+      'Use AS Path Prepending to influence inbound traffic',
+      'Configure MED (Multi-Exit Discriminator)',
+      'Observe BGP decision process in action',
+    ],
+    prerequisites: ['Completed Lab 8 (eBGP)', 'Understanding of AS path'],
+    topology: `
+                     AS 65002
+                   ┌──────────┐
+              eBGP │   R2     │
+           ┌───────┤  .2/24   │
+           │       └──────────┘
+      AS 65001         │
+    ┌──────────┐       │ 10.0.0.0/24
+    │   R1     │       │
+    │  .1/24   ├───────┘
+    │          │       ┌──────────┐
+    │          ├───────┤   R3     │ AS 65003
+    └──────────┘  eBGP │  .3/24   │
+                       └──────────┘
+    
+    R1 has TWO paths to reach remote networks!`,
+    steps: [
+      {
+        title: 'The BGP Decision Process',
+        description: 'When BGP has multiple paths to the same destination, it picks the **best** one using this algorithm (in order):\n\n1. **Highest Weight** (Cisco proprietary, local to router)\n2. **Highest Local Preference** (default 100, shared in iBGP)\n3. **Locally originated** (prefer own routes)\n4. **Shortest AS Path** (fewer AS hops = better)\n5. **Lowest Origin** (IGP < EGP < incomplete)\n6. **Lowest MED** (metric from neighbor AS)\n7. **eBGP over iBGP**\n8. **Lowest IGP metric to next-hop**\n9. **Oldest route** (stability)\n10. **Lowest Router ID**\n\nWe\'ll focus on **Local Preference**, **AS Path**, and **MED** — the most commonly used.',
+        instructions: [
+          'R1 will have TWO eBGP peers: R2 (AS 65002) and R3 (AS 65003)',
+          'Both will advertise the same destination network',
+          'We\'ll manipulate path selection using BGP attributes',
+        ],
+        where: 'info',
+        tip: 'Remember: "Higher is better" for Local Pref & Weight. "Lower is better" for AS Path length & MED.',
+      },
+      {
+        title: 'Build a Multi-path Topology',
+        description: 'Create 3 routers — R1 with two eBGP peers.',
+        instructions: [
+          'Create router1, router2, router3',
+          'Create sw1 (standalone) and connect all 3 routers',
+          'router1→sw1: 10.0.0.1/24',
+          'router2→sw1: 10.0.0.2/24',
+          'router3→sw1: 10.0.0.3/24',
+        ],
+        where: 'builder',
+        verify: 'Three routers all connected to sw1.',
+      },
+      {
+        title: 'Configure eBGP on All Routers',
+        description: 'Set up eBGP — R1 (AS 65001) peers with R2 (AS 65002) and R3 (AS 65003). Both R2 and R3 will advertise 172.16.0.0/24.',
+        commands: [
+          '# R1: AS 65001 — peers with R2 and R3',
+          'ip netns exec router1 vtysh -c "configure terminal" -c "router bgp 65001" -c "bgp router-id 10.0.0.1" -c "neighbor 10.0.0.2 remote-as 65002" -c "neighbor 10.0.0.3 remote-as 65003" -c "address-family ipv4 unicast" -c "network 10.0.1.0/24" -c "exit-address-family" -c "end" -c "write memory"',
+          '',
+          '# R2: AS 65002 — advertises 172.16.0.0/24',
+          'ip netns exec router2 vtysh -c "configure terminal" -c "router bgp 65002" -c "bgp router-id 10.0.0.2" -c "neighbor 10.0.0.1 remote-as 65001" -c "address-family ipv4 unicast" -c "network 172.16.0.0/24" -c "network 10.0.0.0/24" -c "exit-address-family" -c "end" -c "write memory"',
+          '',
+          '# R3: AS 65003 — also advertises 172.16.0.0/24',
+          'ip netns exec router3 vtysh -c "configure terminal" -c "router bgp 65003" -c "bgp router-id 10.0.0.3" -c "neighbor 10.0.0.1 remote-as 65001" -c "address-family ipv4 unicast" -c "network 172.16.0.0/24" -c "network 10.0.0.0/24" -c "exit-address-family" -c "end" -c "write memory"',
+        ],
+        instructions: [
+          'Configure BGP on all 3 routers',
+          'Both R2 and R3 advertise the same 172.16.0.0/24 network',
+        ],
+        where: 'cli',
+        verify: 'All sessions established. R1 sees 172.16.0.0/24 from both R2 and R3.',
+      },
+      {
+        title: 'Check Default Best Path',
+        description: 'See which path R1 selects by default for 172.16.0.0/24.',
+        commands: [
+          '# Check all paths to 172.16.0.0/24',
+          'ip netns exec router1 vtysh -c "show ip bgp 172.16.0.0/24"',
+          '',
+          '# The "best" path is marked with ">"',
+          '# Default: shorter AS path wins (both same length here)',
+          '# So it falls to lowest router-id as tiebreaker',
+        ],
+        instructions: [
+          'Check which path R1 selected as best',
+          'Both paths have AS path length 1, so tie-breaking rules apply',
+        ],
+        where: 'cli',
+        verify: 'R1 shows 2 paths to 172.16.0.0/24, one marked with ">" (best).',
+        tip: 'When AS path length is equal, BGP uses subsequent criteria. The lowest router-id (10.0.0.2) typically wins.',
+      },
+      {
+        title: 'Use Local Preference to Prefer R3',
+        description: 'Local Preference (default 100) tells a router which exit path to prefer. **Higher = better**. Let\'s set routes from R3 to have Local Pref 200.',
+        commands: [
+          'ip netns exec router1 vtysh',
+          'configure terminal',
+          '',
+          '# Create a route map to set local preference',
+          'route-map PREFER-R3 permit 10',
+          'set local-preference 200',
+          'exit',
+          '',
+          '# Apply to R3 neighbor (inbound)',
+          'router bgp 65001',
+          'address-family ipv4 unicast',
+          'neighbor 10.0.0.3 route-map PREFER-R3 in',
+          'exit-address-family',
+          'end',
+          'write memory',
+          '',
+          '# Soft-clear to apply',
+          'clear ip bgp 10.0.0.3 soft in',
+        ],
+        instructions: [
+          'Create a route map that sets Local Preference to 200',
+          'Apply it to the R3 neighbor inbound',
+        ],
+        where: 'cli',
+        verify: 'Route map applied. BGP soft-cleared.',
+      },
+      {
+        title: 'Verify — R3 Path is Now Best',
+        description: 'Check the BGP table — the path via R3 should now be selected as best because Local Pref 200 > 100.',
+        commands: [
+          '# Check paths to 172.16.0.0/24',
+          'ip netns exec router1 vtysh -c "show ip bgp 172.16.0.0/24"',
+          '',
+          '# The R3 path should show localpref 200 and be ">" best',
+          '# The R2 path should show default localpref 100',
+        ],
+        instructions: [
+          'Verify the best path is now via R3 (10.0.0.3)',
+          'Check that Local Preference values differ',
+        ],
+        where: 'cli',
+        verify: 'Path via 10.0.0.3 (R3) is now ">" best with localpref 200.',
+        tip: 'Local Preference is the most commonly used attribute for traffic engineering within an AS.',
+      },
+      {
+        title: 'AS Path Prepending on R3',
+        description: 'Now let\'s try the opposite — make R3\'s path LESS preferred using AS path prepending. R3 will artificially lengthen its AS path by prepending its own AS number multiple times.',
+        commands: [
+          '# First, remove the local-pref route map from R1',
+          'ip netns exec router1 vtysh -c "configure terminal" -c "router bgp 65001" -c "address-family ipv4 unicast" -c "no neighbor 10.0.0.3 route-map PREFER-R3 in" -c "exit-address-family" -c "end" -c "write memory"',
+          '',
+          '# On R3: create a route map to prepend AS path',
+          'ip netns exec router3 vtysh',
+          'configure terminal',
+          'route-map PREPEND-OUT permit 10',
+          'set as-path prepend 65003 65003 65003',
+          'exit',
+          '',
+          'router bgp 65003',
+          'address-family ipv4 unicast',
+          'neighbor 10.0.0.1 route-map PREPEND-OUT out',
+          'exit-address-family',
+          'end',
+          'write memory',
+          '',
+          '# Soft-clear',
+          'clear ip bgp 10.0.0.1 soft out',
+        ],
+        instructions: [
+          'Remove the local-pref change from R1',
+          'On R3, prepend AS 65003 three times to outbound routes',
+          'This makes R3\'s path look longer: 65003 65003 65003 65003',
+        ],
+        where: 'cli',
+        verify: 'AS path prepending configured on R3.',
+        tip: 'AS path prepending is used by networks to influence how OTHER networks send traffic to them. It\'s one of the few ways to influence inbound traffic.',
+      },
+      {
+        title: 'Verify — R2 Path Wins (Shorter AS Path)',
+        description: 'Check R1\'s BGP table. The path via R2 should now be best because its AS path (65002) is shorter than R3\'s (65003 65003 65003 65003).',
+        commands: [
+          '# Check paths — observe AS path lengths',
+          'ip netns exec router1 vtysh -c "show ip bgp 172.16.0.0/24"',
+          '',
+          '# R2 path: AS 65002 (length 1)',
+          '# R3 path: AS 65003 65003 65003 65003 (length 4)',
+          '# R2 wins! Shorter AS path is preferred.',
+        ],
+        instructions: [
+          'Verify R2\'s path is best due to shorter AS path',
+        ],
+        where: 'cli',
+        verify: 'R2 path (AS 65002, length 1) is ">" best. R3 path shows 65003 repeated 4 times.',
+      },
+      {
+        title: '🎉 Lab Complete!',
+        description: 'You\'ve mastered key BGP path attributes! These tools are how network engineers control traffic flow across the Internet.',
+        instructions: [
+          'Key concepts learned:',
+          '• Local Preference: higher = preferred exit path (iBGP scope)',
+          '• AS Path Prepending: longer path = less preferred (influences inbound)',
+          '• BGP decision process: Weight > LP > AS Path > MED > ...',
+          '• Route maps: powerful tool to set/modify attributes',
+          '• "clear ip bgp X soft in/out" applies changes without reset',
+          '• Traffic engineering = influencing path selection',
+          'Next: Lab 11 — BGP Communities & Advanced Policies!',
+        ],
+        where: 'info',
+      },
+    ],
+  },
+
+  // ─── LAB 11: BGP Communities & Advanced Policy ────────────────
+  {
+    id: 'lab-11-bgp-communities',
+    title: 'Lab 11: BGP Communities & Advanced Policy',
+    description: 'Use BGP communities to tag routes and apply complex policies. Learn well-known communities (no-export, no-advertise) and custom community tagging for scalable policy management.',
+    difficulty: 'advanced',
+    duration: '35 min',
+    icon: '🏷️',
+    tags: ['BGP', 'Communities', 'Route Policy', 'no-export', 'no-advertise'],
+    objectives: [
+      'Understand BGP communities as route "tags"',
+      'Use well-known communities: no-export, no-advertise',
+      'Create custom communities for policy signaling',
+      'Build route maps that match and set communities',
+      'Implement a real-world transit vs. peering policy',
+    ],
+    prerequisites: ['Completed Lab 9-10 (filtering & path attributes)'],
+    topology: `
+                      AS 65002 (Transit)
+                    ┌──────────────┐
+               eBGP │     R2       │
+            ┌───────┤   Transit    │──── → Internet
+            │       └──────────────┘
+       AS 65001                          
+     ┌──────────┐                        
+     │   R1     │                        
+     │ Customer │                        
+     │          │                        
+     └────┬─────┘                        
+          │ eBGP                         
+          │       ┌──────────────┐       
+          └───────┤     R3       │ AS 65003 (Peer)
+                  │   Peering    │
+                  └──────────────┘`,
+    steps: [
+      {
+        title: 'What are BGP Communities?',
+        description: 'BGP communities are **tags** attached to routes. They let you signal policy intent to neighboring ASes without changing the route itself.\n\nFormats:\n• **Standard:** AS:value (e.g., 65001:100)\n• **Well-known:**\n  - `no-export` — don\'t advertise to eBGP peers\n  - `no-advertise` — don\'t advertise to ANY peer\n  - `internet` — advertise to everyone (default)\n  - `local-as` — don\'t advertise outside the local AS confederation\n\nCommunities are the backbone of ISP policy. For example, a transit provider might use 65002:666 to mean "blackhole this route" or 65002:100 to mean "set local preference to 100".',
+        instructions: [
+          'In this lab, R1 (customer) has two providers:',
+          'R2 (AS 65002) is the transit provider',
+          'R3 (AS 65003) is a peering partner',
+          'Goal: Only send customer routes to R2, not peering routes',
+        ],
+        where: 'info',
+        tip: 'ISPs define a "community dictionary" — customers tag routes with specific communities to request behavior from the provider.',
+      },
+      {
+        title: 'Build Three-Router Topology',
+        description: 'Create the customer-transit-peering topology.',
+        instructions: [
+          'Create router1 (R1, Customer AS 65001)',
+          'Create router2 (R2, Transit AS 65002)',
+          'Create router3 (R3, Peer AS 65003)',
+          'Create sw1 (standalone), connect all routers',
+          'router1→sw1: 10.0.0.1/24',
+          'router2→sw1: 10.0.0.2/24',
+          'router3→sw1: 10.0.0.3/24',
+        ],
+        where: 'builder',
+        verify: 'Three routers connected to sw1.',
+      },
+      {
+        title: 'Configure Basic eBGP on All Routers',
+        description: 'Set up eBGP between all three routers.',
+        commands: [
+          '# R1 (AS 65001) — customer',
+          'ip netns exec router1 vtysh -c "configure terminal" -c "router bgp 65001" -c "bgp router-id 10.0.0.1" -c "neighbor 10.0.0.2 remote-as 65002" -c "neighbor 10.0.0.3 remote-as 65003" -c "address-family ipv4 unicast" -c "network 10.0.1.0/24" -c "exit-address-family" -c "end" -c "write memory"',
+          '',
+          '# R2 (AS 65002) — transit',
+          'ip netns exec router2 vtysh -c "configure terminal" -c "router bgp 65002" -c "bgp router-id 10.0.0.2" -c "neighbor 10.0.0.1 remote-as 65001" -c "neighbor 10.0.0.3 remote-as 65003" -c "address-family ipv4 unicast" -c "network 10.0.2.0/24" -c "exit-address-family" -c "end" -c "write memory"',
+          '',
+          '# R3 (AS 65003) — peering partner',
+          'ip netns exec router3 vtysh -c "configure terminal" -c "router bgp 65003" -c "bgp router-id 10.0.0.3" -c "neighbor 10.0.0.1 remote-as 65001" -c "address-family ipv4 unicast" -c "network 10.0.3.0/24" -c "exit-address-family" -c "end" -c "write memory"',
+        ],
+        instructions: [
+          'Configure eBGP on all three routers',
+          'R1 peers with both R2 and R3',
+          'R2 also peers with R3 (full mesh)',
+        ],
+        where: 'cli',
+        verify: 'All BGP sessions Established.',
+      },
+      {
+        title: 'Verify — R2 Sees Peering Routes',
+        description: 'Before applying communities, check that R2 (transit) sees R3\'s routes via R1. This is a problem — R1 shouldn\'t transit peering traffic through its paid transit link.',
+        commands: [
+          '# On R2, check if it learned R3\'s network via R1',
+          'ip netns exec router2 vtysh -c "show ip bgp"',
+          '',
+          '# Look for 10.0.3.0/24 — if R2 sees it via R1,',
+          '# it means R1 is transiting R3\'s traffic = not good!',
+        ],
+        instructions: [
+          'Check R2\'s BGP table for R3\'s routes',
+          'R2 might learn 10.0.3.0/24 through R1 (customer)',
+        ],
+        where: 'cli',
+        verify: 'R2 may see 10.0.3.0/24 via R1 or directly via R3.',
+        tip: 'A customer (R1) should NOT transit peering traffic through its paid transit (R2). This is a classic BGP policy problem.',
+      },
+      {
+        title: 'Tag Peering Routes with no-export',
+        description: 'On R1, tag routes learned from the peering partner (R3) with the well-known community **no-export**. This tells R1: "do not advertise these routes to eBGP peers" — so R2 won\'t learn R3\'s routes through R1.',
+        commands: [
+          'ip netns exec router1 vtysh',
+          'configure terminal',
+          '',
+          '# Route map to tag incoming routes from R3 with no-export',
+          'route-map FROM-PEER permit 10',
+          'set community no-export',
+          'exit',
+          '',
+          '# Apply to R3 neighbor inbound',
+          'router bgp 65001',
+          'address-family ipv4 unicast',
+          'neighbor 10.0.0.3 route-map FROM-PEER in',
+          'exit-address-family',
+          '',
+          'end',
+          'write memory',
+          '',
+          '# Re-process routes',
+          'clear ip bgp 10.0.0.3 soft in',
+        ],
+        instructions: [
+          'Create a route map that sets no-export community',
+          'Apply it to routes received from R3 (peering partner)',
+          'Soft-clear to re-process',
+        ],
+        where: 'cli',
+        verify: 'Route map applied. BGP session is not reset.',
+        tip: 'no-export means: "I can use this route, but I won\'t forward it to any eBGP peer." R1 can still reach R3, but won\'t tell R2 about it.',
+      },
+      {
+        title: 'Verify — no-export in Action',
+        description: 'Check that R1 still has R3\'s route but R2 no longer learns it from R1.',
+        commands: [
+          '# R1 should still have the route (with no-export tag)',
+          'ip netns exec router1 vtysh -c "show ip bgp 10.0.3.0/24"',
+          '',
+          '# Look for "Community: no-export" in the output',
+          '',
+          '# R2 should NOT learn 10.0.3.0/24 via R1 anymore',
+          'ip netns exec router2 vtysh -c "show ip bgp 10.0.3.0/24"',
+        ],
+        instructions: [
+          'On R1: verify route has no-export community attached',
+          'On R2: verify R2 no longer has the route via R1',
+        ],
+        where: 'cli',
+        verify: 'R1 shows 10.0.3.0/24 with "Community: no-export". R2 does NOT receive it from R1.',
+      },
+      {
+        title: 'Custom Communities — Tag Customer Routes',
+        description: 'Now let\'s use custom communities. We\'ll tag R1\'s customer routes with 65001:100 to signal "this is a customer route."',
+        commands: [
+          'ip netns exec router1 vtysh',
+          'configure terminal',
+          '',
+          '# Route map for outbound to transit (R2)',
+          'route-map TO-TRANSIT permit 10',
+          'set community 65001:100',
+          'exit',
+          '',
+          'router bgp 65001',
+          'address-family ipv4 unicast',
+          'neighbor 10.0.0.2 route-map TO-TRANSIT out',
+          'exit-address-family',
+          'end',
+          'write memory',
+          '',
+          'clear ip bgp 10.0.0.2 soft out',
+        ],
+        instructions: [
+          'Create a route map to tag outbound routes to R2 with 65001:100',
+          'The transit provider can use this community to apply policies',
+        ],
+        where: 'cli',
+        verify: 'Custom community route map applied.',
+      },
+      {
+        title: 'Verify Custom Communities on R2',
+        description: 'Check on R2 (transit) that routes from R1 carry the 65001:100 community tag.',
+        commands: [
+          '# On R2, check R1\'s routes with community details',
+          'ip netns exec router2 vtysh -c "show ip bgp 10.0.1.0/24"',
+          '',
+          '# Look for "Community: 65001:100" in the output',
+          '',
+          '# Show all routes with a specific community',
+          'ip netns exec router2 vtysh -c "show ip bgp community 65001:100"',
+        ],
+        instructions: [
+          'Verify routes from R1 carry the 65001:100 community',
+          'The transit provider can now build policies based on this tag',
+        ],
+        where: 'cli',
+        verify: 'Routes from R1 show "Community: 65001:100" on R2.',
+        tip: 'In the real world, ISPs publish a community dictionary. Customers use these to request specific treatment (set local-pref, prepend, blackhole, etc.).',
+      },
+      {
+        title: '🎉 Lab Complete!',
+        description: 'You\'ve mastered BGP communities! This is how ISPs and large networks implement scalable routing policy across thousands of peering sessions.',
+        instructions: [
+          'Key concepts learned:',
+          '• Communities are "tags" attached to BGP routes',
+          '• no-export: don\'t advertise to eBGP peers',
+          '• no-advertise: don\'t advertise to ANY peer',
+          '• Custom communities (AS:value) signal policy intent',
+          '• Route maps set/match communities',
+          '• Transit vs. peering: communities control route leaking',
+          '• Real ISPs use communities for blackholing, local-pref, etc.',
+          'Congratulations on completing all BGP labs! 🎓',
+        ],
+        where: 'info',
+      },
+    ],
+  },
 ];
 
 export function getLabById(id: string): Lab | undefined {
