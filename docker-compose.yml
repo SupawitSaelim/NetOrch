@@ -1,28 +1,55 @@
 services:
+  # ── Backend API ──────────────────────────────────────
   backend:
     build:
       context: ./backend
       dockerfile: Dockerfile
+    container_name: netorch-backend
     ports:
       - "8000:8000"
-    env_file:
-      - ./backend/.env
+    environment:
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-key-change-in-production}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin123}
+      - VM_HOST=${VM_HOST:-192.168.64.3}
+      - VM_USER=${VM_USER:-root}
+      - VM_SSH_KEY=/root/.ssh/id_ed25519
+      - FRR_ENABLED=${FRR_ENABLED:-false}
+      - RYU_ENABLED=${RYU_ENABLED:-false}
+      - OVS_ENABLED=${OVS_ENABLED:-false}
+      - DEBUG=${DEBUG:-false}
     volumes:
-      - ~/.ssh/id_ed25519:/root/.ssh/id_ed25519:ro
+      - backend-data:/app/data
+      - ${SSH_KEY_PATH:-~/.ssh/id_ed25519}:/root/.ssh/id_ed25519:ro
+    networks:
+      - netorch
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health')"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 10s
 
+  # ── Frontend + Nginx Reverse Proxy ──────────────────
   frontend:
     build:
-      context: ./frontend
-      dockerfile: Dockerfile
+      context: .
+      dockerfile: deploy/Dockerfile.frontend
+    container_name: netorch-frontend
     ports:
       - "80:80"
     depends_on:
       backend:
         condition: service_healthy
+    networks:
+      - netorch
     restart: unless-stopped
+
+volumes:
+  backend-data:
+    driver: local
+
+networks:
+  netorch:
+    driver: bridge
