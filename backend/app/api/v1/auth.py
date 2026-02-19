@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import timedelta
-from typing import Any, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
@@ -100,7 +100,7 @@ async def create_user(
             display_name=data.display_name,
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     audit.record(
         user=admin["username"],
         role=admin["role"],
@@ -125,7 +125,7 @@ async def update_user(
             username, role=data.role, password=data.password, display_name=data.display_name
         )
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     audit.record(
         user=admin["username"],
         role=admin["role"],
@@ -147,7 +147,7 @@ async def delete_user(
     try:
         user_store.delete_user(username)
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e)) from e
     audit.record(
         user=admin["username"],
         role=admin["role"],

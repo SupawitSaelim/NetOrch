@@ -63,9 +63,9 @@ def get_entries(
     *,
     limit: int = 50,
     offset: int = 0,
-    user: str = None,
-    action: str = None,
-    resource: str = None,
+    user: str | None = None,
+    action: str | None = None,
+    resource: str | None = None,
 ) -> tuple:
     """Return filtered audit entries from memory (newest first)."""
     filtered = list(_log)

@@ -14,9 +14,9 @@ router = APIRouter(prefix="/audit", tags=["Audit"])
 async def get_audit_logs(
     limit: int = 50,
     offset: int = 0,
-    user: str = None,
-    action: str = None,
-    resource: str = None,
+    user: str | None = None,
+    action: str | None = None,
+    resource: str | None = None,
     _caller: dict = Depends(get_current_user),
 ):
     """Get audit log entries (any authenticated user)."""
