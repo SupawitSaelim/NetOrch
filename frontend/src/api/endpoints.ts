@@ -216,3 +216,32 @@ export const toolListInterfaces = (source?: string) =>
     source: string;
     interfaces: { name: string; state: string; addresses: string[] }[];
   }>('/tools/interfaces', { params: source ? { source } : {} });
+
+// --- Per-Router Config ---
+export const getRouterConfig = (name: string) =>
+  client.get<{ name: string; config: string }>(`/topology/builder/routers/${name}/config`);
+
+export const getRouterRoutes = (name: string) =>
+  client.get<{ name: string; routes: string }>(`/topology/builder/routers/${name}/routes`);
+
+export const addRouterBGPNeighbor = (name: string, data: { neighbor_ip: string; remote_as: number }) =>
+  client.post<{ success: boolean; message: string }>(`/topology/builder/routers/${name}/bgp/neighbor`, data);
+
+export const deleteRouterBGPNeighbor = (name: string, ip: string) =>
+  client.delete<{ success: boolean; message: string }>(`/topology/builder/routers/${name}/bgp/neighbor/${ip}`);
+
+export const addRouterOSPF = (name: string, data: { network: string; area?: string }) =>
+  client.post<{ success: boolean; message: string }>(`/topology/builder/routers/${name}/ospf`, data);
+
+// --- Topology Presets ---
+export const listPresets = () =>
+  client.get<{ presets: { name: string; description: string; node_count: number; link_count: number; saved_at: string }[] }>('/topology/builder/presets');
+
+export const savePreset = (data: { name: string; description?: string }) =>
+  client.post<{ success: boolean; message: string }>('/topology/builder/presets', data);
+
+export const deletePreset = (name: string) =>
+  client.delete<{ success: boolean; message: string }>(`/topology/builder/presets/${name}`);
+
+export const getPreset = (name: string) =>
+  client.get<{ description: string; nodes: any[]; links: any[]; saved_at: string }>(`/topology/builder/presets/${name}`);

@@ -20,6 +20,8 @@ const WS_TOOLTIPS: Record<string, string> = {
 export default function Header({ wsStatus = 'disconnected' }: Props) {
   const toggleSidebar = useAppStore((s) => s.toggleSidebar);
   const systemMode = useAppStore((s) => s.systemMode);
+  const theme = useAppStore((s) => s.theme);
+  const toggleTheme = useAppStore((s) => s.toggleTheme);
   const { isAuthenticated, username, logout, login } = useAuthStore();
   const [showLogin, setShowLogin] = useState(false);
   const [loginForm, setLoginForm] = useState({ username: '', password: '' });
@@ -70,6 +72,24 @@ export default function Header({ wsStatus = 'disconnected' }: Props) {
       </div>
 
       <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
+        {/* Theme toggle */}
+        <button
+          onClick={toggleTheme}
+          title={`Switch to ${theme === 'dark' ? 'light' : 'dark'} mode`}
+          style={{
+            background: 'none',
+            border: '1px solid var(--color-border)',
+            color: 'var(--color-text)',
+            fontSize: 16,
+            cursor: 'pointer',
+            borderRadius: 8,
+            padding: '4px 8px',
+            display: 'flex',
+            alignItems: 'center',
+          }}
+        >
+          {theme === 'dark' ? '☀️' : '🌙'}
+        </button>
         {/* Live WebSocket indicator */}
         <div
           style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'help', position: 'relative' }}

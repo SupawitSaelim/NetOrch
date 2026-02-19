@@ -1801,6 +1801,451 @@ export const labs: Lab[] = [
       },
     ],
   },
+
+  // ─── LAB 12: OSPF Single-Area Basics ──────────────────────────
+  {
+    id: 'lab-12-ospf-single-area',
+    title: 'Lab 12: OSPF Single-Area Basics',
+    description: 'Configure OSPF in a single area (Area 0) between two routers. Learn the fundamentals of link-state routing, neighbor adjacency, and SPF path calculation.',
+    difficulty: 'beginner',
+    duration: '20 min',
+    icon: '🕸️',
+    tags: ['OSPF', 'Routing', 'Link-State', 'Area 0', 'SPF'],
+    objectives: [
+      'Understand OSPF as a link-state routing protocol',
+      'Configure OSPF Area 0 on two connected routers',
+      'Verify OSPF neighbor adjacency reaches FULL state',
+      'Observe OSPF-learned routes in the routing table',
+      'Understand Router ID, Hello/Dead intervals, and LSA types',
+    ],
+    prerequisites: [
+      'VM is running with FRR + OVS',
+      'Backend and Frontend are started',
+      'Logged in (for write operations)',
+    ],
+    topology: `
+    ┌──────────┐   10.0.12.0/30   ┌──────────┐
+    │ router1  │─────────────────│ router2  │
+    │ .1       │                  │ .2       │
+    │ Loopback │                  │ Loopback │
+    │ 1.1.1.1  │                  │ 2.2.2.2  │
+    └──────────┘                  └──────────┘
+              Area 0 (Backbone)
+    `,
+    steps: [
+      {
+        title: 'Understand OSPF',
+        description: 'OSPF (Open Shortest Path First) is a link-state Interior Gateway Protocol (IGP). Unlike distance-vector protocols like RIP, OSPF builds a complete map of the network topology and uses Dijkstra\'s SPF algorithm to compute shortest paths.',
+        instructions: [
+          'OSPF routers exchange LSAs (Link-State Advertisements) to build a Link-State Database (LSDB)',
+          'All routers in an area share the same LSDB',
+          'Each router independently runs SPF to compute the best path to every destination',
+          'OSPF uses "cost" as metric (typically based on bandwidth: cost = 100Mbps / link_BW)',
+          'OSPF is classless and supports VLSM and CIDR',
+        ],
+        tip: 'OSPF Area 0 is the backbone area — all other areas must connect to it. For single-area designs, all routers are in Area 0.',
+        where: 'info',
+      },
+      {
+        title: 'Create Two Routers',
+        description: 'Use the Topology Builder to create router1 and router2, then link them with a /30 subnet.',
+        instructions: [
+          'Open the Topology Builder page',
+          'Click "🔨 Add Router" and create "router1"',
+          'Click "🔨 Add Router" and create "router2"',
+          'Click "🔗 Add Link", click router1, then click router2',
+          'Set router1 IP: 10.0.12.1/30, router2 IP: 10.0.12.2/30',
+        ],
+        tip: 'The /30 subnet gives you exactly 2 usable IPs — perfect for point-to-point links.',
+        where: 'builder',
+      },
+      {
+        title: 'Configure OSPF on Router1',
+        description: 'Enable OSPF process and advertise the connected network into Area 0.',
+        instructions: [
+          'Right-click router1 → Open CLI Terminal',
+          'Enter OSPF configuration to advertise the connected link',
+        ],
+        commands: [
+          'configure terminal',
+          'router ospf',
+          'network 10.0.12.0/30 area 0',
+          'end',
+        ],
+        tip: 'The "network" command tells OSPF which interfaces to activate on. Any interface matching this prefix will send/receive Hello packets.',
+        where: 'cli',
+      },
+      {
+        title: 'Configure OSPF on Router2',
+        description: 'Enable OSPF on router2 with the same area.',
+        instructions: [
+          'Right-click router2 → Open CLI Terminal',
+          'Configure OSPF with Area 0',
+        ],
+        commands: [
+          'configure terminal',
+          'router ospf',
+          'network 10.0.12.0/30 area 0',
+          'end',
+        ],
+        verify: 'After configuring both sides, OSPF will start sending Hello packets and form a neighbor adjacency.',
+        where: 'cli',
+      },
+      {
+        title: 'Verify OSPF Neighbors',
+        description: 'Check that OSPF has formed a FULL adjacency between router1 and router2.',
+        instructions: [
+          'On router1, check the OSPF neighbor table',
+          'Look for router2 in "FULL" state — this means LSDBs are synchronized',
+        ],
+        commands: [
+          'show ip ospf neighbor',
+        ],
+        verify: 'You should see one neighbor with State = "Full". The DR/BDR election happens on broadcast segments.',
+        tip: 'OSPF states: Down → Init → 2-Way → ExStart → Exchange → Loading → Full. On point-to-point links, it goes directly to Full.',
+        where: 'cli',
+      },
+      {
+        title: 'Check OSPF Routes',
+        description: 'Verify that OSPF-learned routes appear in the routing table.',
+        instructions: [
+          'On router1, check the routing table for OSPF routes (marked with "O")',
+          'You should see the connected network learned via OSPF',
+        ],
+        commands: [
+          'show ip route ospf',
+          'show ip ospf database',
+        ],
+        verify: 'Routes with "O" prefix are OSPF-learned. The LSDB shows the LSAs exchanged between routers.',
+        where: 'cli',
+      },
+      {
+        title: 'Summary',
+        description: 'You have successfully configured OSPF in a single Area 0!',
+        instructions: [
+          '✅ Created two routers with a point-to-point /30 link',
+          '✅ Enabled OSPF Area 0 on both routers',
+          '✅ Verified FULL neighbor adjacency',
+          '✅ Confirmed OSPF routes in the routing table',
+          '',
+          '📚 Key OSPF concepts learned:',
+          '• Hello packets (default every 10s on broadcast, 30s on NBMA)',
+          '• LSA exchange and LSDB synchronization',
+          '• SPF algorithm computes shortest paths',
+          '• Cost metric = reference BW / interface BW',
+        ],
+        where: 'info',
+      },
+    ],
+  },
+
+  // ─── LAB 13: OSPF Multi-Area ─────────────────────────────────
+  {
+    id: 'lab-13-ospf-multi-area',
+    title: 'Lab 13: OSPF Multi-Area Design',
+    description: 'Build a multi-area OSPF network with Area 0 (backbone) and Area 1. Learn ABR (Area Border Router) behavior, inter-area route summarization, and LSA types 1/2/3.',
+    difficulty: 'intermediate',
+    duration: '30 min',
+    icon: '🗺️',
+    tags: ['OSPF', 'Multi-Area', 'ABR', 'Area 0', 'Area 1', 'LSA Type 3'],
+    objectives: [
+      'Design a multi-area OSPF topology with backbone (Area 0) and non-backbone area',
+      'Configure an ABR (Area Border Router) connecting Area 0 and Area 1',
+      'Understand inter-area routes (O IA) in the routing table',
+      'Examine LSA Type 1 (Router), Type 2 (Network), and Type 3 (Summary)',
+      'Verify end-to-end reachability across areas',
+    ],
+    prerequisites: [
+      'Completed Lab 12 (OSPF single-area basics)',
+      'VM is running with FRR + OVS',
+    ],
+    topology: `
+              Area 0                    Area 1
+    ┌──────────┐  10.0.12.0/30  ┌──────────┐  10.0.23.0/30  ┌──────────┐
+    │ router1  │───────────────│ router2  │───────────────│ router3  │
+    │ .1       │               │ ABR .2/.1│               │ .2       │
+    └──────────┘               └──────────┘               └──────────┘
+    `,
+    steps: [
+      {
+        title: 'Multi-Area OSPF Concepts',
+        description: 'In large networks, a single OSPF area becomes inefficient — every router has the full LSDB and reruns SPF for any topology change. Multi-area OSPF divides the network into areas to limit SPF scope and LSA flooding.',
+        instructions: [
+          'Area 0 (Backbone) — all areas must connect to Area 0, either directly or via virtual links',
+          'ABR (Area Border Router) — a router with interfaces in multiple areas; summarizes routes between areas',
+          'LSA Type 1 (Router LSA) — stays within an area, describes a router\'s links',
+          'LSA Type 2 (Network LSA) — describes a broadcast segment, generated by the DR',
+          'LSA Type 3 (Summary LSA) — generated by the ABR, advertises inter-area prefixes',
+        ],
+        tip: 'ABRs are the key to multi-area OSPF — they translate between areas by generating Type 3 LSAs.',
+        where: 'info',
+      },
+      {
+        title: 'Create Three Routers',
+        description: 'Build the topology: router1 (Area 0), router2 (ABR — Area 0 + Area 1), router3 (Area 1).',
+        instructions: [
+          'Open the Topology Builder',
+          'Create router1, router2, router3',
+          'Link router1 ↔ router2: IPs 10.0.12.1/30 and 10.0.12.2/30',
+          'Link router2 ↔ router3: IPs 10.0.23.1/30 and 10.0.23.2/30',
+        ],
+        where: 'builder',
+      },
+      {
+        title: 'Configure Router1 (Area 0)',
+        description: 'Router1 is fully in the backbone area.',
+        instructions: [
+          'Open router1 CLI terminal',
+          'Configure OSPF with Area 0',
+        ],
+        commands: [
+          'configure terminal',
+          'router ospf',
+          'network 10.0.12.0/30 area 0',
+          'end',
+        ],
+        where: 'cli',
+      },
+      {
+        title: 'Configure Router2 as ABR',
+        description: 'Router2 has one interface in Area 0 and another in Area 1 — making it an ABR.',
+        instructions: [
+          'Open router2 CLI terminal',
+          'Configure OSPF with both areas',
+        ],
+        commands: [
+          'configure terminal',
+          'router ospf',
+          'network 10.0.12.0/30 area 0',
+          'network 10.0.23.0/30 area 1',
+          'end',
+        ],
+        tip: 'Router2 becomes an ABR because it has interfaces in multiple OSPF areas. It will generate Type 3 Summary LSAs.',
+        where: 'cli',
+      },
+      {
+        title: 'Configure Router3 (Area 1)',
+        description: 'Router3 is fully in Area 1.',
+        instructions: [
+          'Open router3 CLI terminal',
+          'Configure OSPF with Area 1',
+        ],
+        commands: [
+          'configure terminal',
+          'router ospf',
+          'network 10.0.23.0/30 area 1',
+          'end',
+        ],
+        where: 'cli',
+      },
+      {
+        title: 'Verify ABR and Inter-Area Routes',
+        description: 'Check that router2 shows as ABR and inter-area routes are propagated.',
+        instructions: [
+          'On router1 — check routing table for inter-area OSPF routes (O IA)',
+          'On router2 — verify it identifies as ABR',
+          'On router3 — check for OSPF routes from Area 0',
+        ],
+        commands: [
+          'show ip route ospf',
+          'show ip ospf',
+          'show ip ospf database',
+        ],
+        verify: 'On router1, you should see 10.0.23.0/30 as "O IA" (inter-area). On router2, "show ip ospf" should show "Area Border Router" flag.',
+        where: 'cli',
+      },
+      {
+        title: 'Examine LSA Types',
+        description: 'Look at the LSDB to understand different LSA types.',
+        instructions: [
+          'On router1, examine the link-state database',
+          'You should see Type 1 (Router LSAs) from Area 0 and Type 3 (Summary LSAs) from the ABR',
+        ],
+        commands: [
+          'show ip ospf database',
+          'show ip ospf database summary',
+        ],
+        tip: 'Type 1 LSAs describe routers within the area. Type 3 LSAs are created by the ABR to advertise prefixes from other areas.',
+        where: 'cli',
+      },
+      {
+        title: 'Test End-to-End Connectivity',
+        description: 'Verify that router1 (Area 0) can reach router3 (Area 1) through the ABR.',
+        instructions: [
+          'From router1, ping router3',
+        ],
+        commands: [
+          'ping 10.0.23.2',
+        ],
+        verify: 'Ping should succeed — traffic crosses from Area 0 → ABR → Area 1.',
+        where: 'cli',
+      },
+      {
+        title: 'Summary',
+        description: 'You have built a multi-area OSPF network!',
+        instructions: [
+          '✅ Area 0 (backbone) with router1',
+          '✅ ABR (router2) connecting Area 0 and Area 1',
+          '✅ Area 1 with router3',
+          '✅ Verified inter-area routes (O IA) and LSA types',
+          '✅ End-to-end connectivity across areas',
+          '',
+          '📚 Key concepts:',
+          '• ABRs generate Type 3 Summary LSAs for inter-area routing',
+          '• Each area has its own LSDB — SPF runs independently per area',
+          '• All areas must connect to Area 0 (directly or via virtual links)',
+        ],
+        where: 'info',
+      },
+    ],
+  },
+
+  // ─── LAB 14: OSPF Stub Area ──────────────────────────────────
+  {
+    id: 'lab-14-ospf-stub-area',
+    title: 'Lab 14: OSPF Stub & Totally Stubby Areas',
+    description: 'Configure OSPF stub areas to reduce routing table size at the edge. Learn how stub areas block external LSAs and totally stubby areas also block inter-area summaries, using a default route instead.',
+    difficulty: 'intermediate',
+    duration: '25 min',
+    icon: '🛡️',
+    tags: ['OSPF', 'Stub Area', 'Totally Stubby', 'Default Route', 'LSA Filtering'],
+    objectives: [
+      'Understand why stub areas are used (reduce LSDB size)',
+      'Configure a stub area that blocks Type 5 (External) LSAs',
+      'Configure a totally stubby area that also blocks Type 3 (Summary) LSAs',
+      'Verify that stub routers receive a default route from the ABR',
+      'Compare routing tables between normal, stub, and totally stubby areas',
+    ],
+    prerequisites: [
+      'Completed Lab 13 (OSPF multi-area)',
+      'VM is running with FRR + OVS',
+    ],
+    topology: `
+              Area 0                    Area 1 (Stub)
+    ┌──────────┐  10.0.12.0/30  ┌──────────┐  10.0.23.0/30  ┌──────────┐
+    │ router1  │───────────────│ router2  │───────────────│ router3  │
+    │ .1       │               │ ABR .2/.1│               │ .2       │
+    └──────────┘               └──────────┘               └──────────┘
+    `,
+    steps: [
+      {
+        title: 'Why Stub Areas?',
+        description: 'In networks receiving many external routes (e.g., from BGP redistribution), edge areas don\'t need to know every external prefix. Stub areas inject a default route instead, dramatically reducing LSDB and routing table size.',
+        instructions: [
+          'Normal Area — receives all LSA types (1, 2, 3, 4, 5)',
+          'Stub Area — blocks Type 4 (ASBR Summary) and Type 5 (External) LSAs. ABR injects default route.',
+          'Totally Stubby — blocks Type 3, 4, and 5. Only Type 1, 2, and a single default route remain.',
+          'Benefit: smaller routing table, faster SPF, less memory usage',
+          'Restriction: No ASBR (external route redistribution) allowed inside a stub area',
+        ],
+        tip: 'Use stub areas for leaf/branch areas that only need a default route to reach the rest of the network.',
+        where: 'info',
+      },
+      {
+        title: 'Set Up the Topology',
+        description: 'Create the same 3-router topology from Lab 13 (or reuse if still present).',
+        instructions: [
+          'Create router1, router2, router3 in the Topology Builder',
+          'Link router1 ↔ router2: 10.0.12.1/30 and 10.0.12.2/30',
+          'Link router2 ↔ router3: 10.0.23.1/30 and 10.0.23.2/30',
+        ],
+        where: 'builder',
+      },
+      {
+        title: 'Configure Area 0 (Router1)',
+        description: 'Router1 stays in the backbone area as normal.',
+        instructions: ['Open router1 CLI and configure OSPF Area 0'],
+        commands: [
+          'configure terminal',
+          'router ospf',
+          'network 10.0.12.0/30 area 0',
+          'end',
+        ],
+        where: 'cli',
+      },
+      {
+        title: 'Configure Stub Area on ABR (Router2)',
+        description: 'On the ABR, declare Area 1 as a stub area. The ABR will automatically inject a default route into the stub area.',
+        instructions: [
+          'Open router2 CLI',
+          'Configure both areas, with Area 1 as stub',
+        ],
+        commands: [
+          'configure terminal',
+          'router ospf',
+          'network 10.0.12.0/30 area 0',
+          'network 10.0.23.0/30 area 1',
+          'area 1 stub',
+          'end',
+        ],
+        tip: 'Both the ABR and all routers inside the stub area must have "area X stub" configured. Mismatched config prevents adjacency!',
+        where: 'cli',
+      },
+      {
+        title: 'Configure Stub Area on Router3',
+        description: 'Router3 is inside the stub area — it must also declare Area 1 as stub.',
+        instructions: ['Open router3 CLI and configure OSPF with stub area'],
+        commands: [
+          'configure terminal',
+          'router ospf',
+          'network 10.0.23.0/30 area 1',
+          'area 1 stub',
+          'end',
+        ],
+        where: 'cli',
+      },
+      {
+        title: 'Verify Stub Behavior',
+        description: 'Check that router3 receives a default route instead of individual external routes.',
+        instructions: [
+          'On router3, check the routing table',
+          'You should see a default route (0.0.0.0/0) learned via OSPF from the ABR',
+          'Compare with router1\'s routing table which has all specific routes',
+        ],
+        commands: [
+          'show ip route ospf',
+          'show ip ospf database',
+        ],
+        verify: 'Router3 should show "O*IA 0.0.0.0/0" as a default route from the ABR. No Type 5 LSAs in the LSDB.',
+        where: 'cli',
+      },
+      {
+        title: 'Upgrade to Totally Stubby (Optional)',
+        description: 'Make Area 1 "totally stubby" — the ABR blocks both external AND inter-area summary LSAs. Only a default route reaches router3.',
+        instructions: [
+          'On router2 (ABR only), change stub to "no-summary"',
+          'Then verify router3\'s routing table is even smaller',
+        ],
+        commands: [
+          'configure terminal',
+          'router ospf',
+          'area 1 stub no-summary',
+          'end',
+        ],
+        tip: 'The "no-summary" keyword is configured ONLY on the ABR. Routers inside the area keep "area X stub" unchanged.',
+        verify: 'Router3 now only has directly connected routes + the default route. No Type 3 Summary LSAs in its LSDB.',
+        where: 'cli',
+      },
+      {
+        title: 'Summary',
+        description: 'You have configured OSPF stub and totally stubby areas!',
+        instructions: [
+          '✅ Created a 3-router multi-area topology',
+          '✅ Configured Area 1 as a stub area',
+          '✅ Verified default route injection by ABR',
+          '✅ Upgraded to totally stubby to minimize routing table further',
+          '',
+          '📚 Key concepts:',
+          '• Stub: blocks Type 4 & 5 LSAs, ABR injects default route',
+          '• Totally Stubby: also blocks Type 3, only default route remains',
+          '• "area X stub" must match on all routers in the area',
+          '• "no-summary" is ABR-only keyword for totally stubby',
+          '• No ASBRs (external redistribution) allowed in stub areas',
+        ],
+        where: 'info',
+      },
+    ],
+  },
 ];
 
 export function getLabById(id: string): Lab | undefined {

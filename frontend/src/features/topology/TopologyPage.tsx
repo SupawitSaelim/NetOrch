@@ -13,6 +13,14 @@ import {
   createCloud,
   deleteCloud,
   clearAllTopology,
+  toolPing,
+  getRouterConfig,
+  getRouterRoutes,
+  addRouterBGPNeighbor,
+  addRouterOSPF,
+  listPresets,
+  savePreset,
+  deletePreset,
 } from '../../api/endpoints';
 import type { Topology } from '../../types';
 import { SkeletonCard, ErrorBanner } from '../../components/Shared';
@@ -122,6 +130,27 @@ export default function TopologyPage() {
     | { x: number; y: number; kind: 'link'; link: SimLink }
     | null
   >(null);
+
+  // ── Connectivity test ──
+  const [pingSource, setPingSource] = useState<SimNode | null>(null);
+  const [pingResult, setPingResult] = useState<{ source: string; target: string; output: string; success: boolean; summary?: any } | null>(null);
+  const [pingLoading, setPingLoading] = useState(false);
+
+  // ── Router config panel ──
+  const [configTab, setConfigTab] = useState<'info' | 'config' | 'routes'>('info');
+  const [routerConfigText, setRouterConfigText] = useState('');
+  const [routerRoutesText, setRouterRoutesText] = useState('');
+  const [configLoading, setConfigLoading] = useState(false);
+  const [bgpForm, setBgpForm] = useState({ neighbor_ip: '', remote_as: '' });
+  const [ospfForm, setOspfForm] = useState({ network: '', area: '0' });
+  const [configMsg, setConfigMsg] = useState<{ text: string; ok: boolean } | null>(null);
+
+  // ── Presets ──
+  const [showPresetDialog, setShowPresetDialog] = useState(false);
+  const [presets, setPresets] = useState<{ name: string; description: string; node_count: number; link_count: number; saved_at: string }[]>([]);
+  const [presetName, setPresetName] = useState('');
+  const [presetDesc, setPresetDesc] = useState('');
+  const [presetLoading, setPresetLoading] = useState(false);
 
   // ── D3 refs ──
   const svgRef = useRef<SVGSVGElement>(null);
@@ -705,6 +734,7 @@ export default function TopologyPage() {
 
       // Select mode
       setPropertiesNode(d);
+      setConfigTab('info'); setRouterConfigText(''); setRouterRoutesText(''); setConfigMsg(null);
       nodeGs.selectAll('.select-ring').attr('opacity', 0);
       d3.select(event.currentTarget as Element).select('.select-ring').attr('opacity', 1);
     });
@@ -915,6 +945,37 @@ export default function TopologyPage() {
             style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, cursor: 'pointer', background: 'var(--color-bg-card)', border: '1px solid var(--color-border)', color: 'var(--color-text)', opacity: refreshMut.isPending ? 0.5 : 1 }}>
             {refreshMut.isPending ? '↻ Refreshing…' : '↻ Refresh'}
           </button>
+          <button onClick={() => {
+            const svg = svgRef.current;
+            if (!svg) return;
+            const clone = svg.cloneNode(true) as SVGSVGElement;
+            clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+            // set explicit background
+            const bg = getComputedStyle(document.documentElement).getPropertyValue('--color-bg-card').trim();
+            const rect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            rect.setAttribute('width', '100%'); rect.setAttribute('height', '100%'); rect.setAttribute('fill', bg);
+            clone.insertBefore(rect, clone.firstChild);
+            const xml = new XMLSerializer().serializeToString(clone);
+            const blob = new Blob([xml], { type: 'image/svg+xml' });
+            const canvas = document.createElement('canvas');
+            const w = svg.clientWidth * 2, h = svg.clientHeight * 2;
+            canvas.width = w; canvas.height = h;
+            const ctx = canvas.getContext('2d')!;
+            const img = new Image();
+            img.onload = () => { ctx.drawImage(img, 0, 0, w, h); const a = document.createElement('a'); a.download = `netorch-topology-${Date.now()}.png`; a.href = canvas.toDataURL('image/png'); a.click(); URL.revokeObjectURL(img.src); };
+            img.src = URL.createObjectURL(blob);
+          }} title="Export topology as PNG image"
+            style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, cursor: 'pointer', background: 'linear-gradient(135deg, #06b6d422, #3b82f622)', border: '1px solid rgba(6,182,212,0.3)', color: '#06b6d4', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+            📸 Export PNG
+          </button>
+          <button onClick={() => {
+            setShowPresetDialog(true);
+            setPresetLoading(true);
+            listPresets().then(r => setPresets(r.data.presets)).catch(() => {}).finally(() => setPresetLoading(false));
+          }} title="Save or load topology presets"
+            style={{ padding: '6px 14px', borderRadius: 8, fontSize: 12, cursor: 'pointer', background: 'linear-gradient(135deg, #f59e0b22, #eab30822)', border: '1px solid rgba(245,158,11,0.3)', color: '#f59e0b', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+            💾 Presets
+          </button>
           {Object.entries(NODE_COLORS).map(([type, color]) => (
             <span key={type} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
               <span style={{ width: 8, height: 8, borderRadius: '50%', background: color, display: 'inline-block' }} />
@@ -1061,20 +1122,110 @@ export default function TopologyPage() {
                   v != null ? <PropRow key={k} label={k} value={String(v)} /> : null
                 )}
               </div>
-              {/* FRR Info for VRouter */}
+              {/* Router Config Tabs */}
               {propertiesNode.type === 'router' && propertiesNode.id.startsWith('vrouter-') && (
-                <div style={{ marginTop: 12, padding: '8px 10px', background: 'rgba(34,197,94,0.08)', borderRadius: 6, border: '1px solid rgba(34,197,94,0.15)' }}>
-                  <div style={{ fontWeight: 600, fontSize: 11, color: '#22c55e', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
-                    <span>🦓</span> FRR Routing Suite
+                <div style={{ marginTop: 12 }}>
+                  <div style={{ display: 'flex', gap: 2, marginBottom: 8 }}>
+                    {(['info', 'config', 'routes'] as const).map(t => (
+                      <button key={t} onClick={() => {
+                        setConfigTab(t);
+                        if (t === 'config' && !routerConfigText) {
+                          setConfigLoading(true);
+                          getRouterConfig(propertiesNode.name).then(r => setRouterConfigText(r.data.config)).catch(() => setRouterConfigText('Failed to load')).finally(() => setConfigLoading(false));
+                        }
+                        if (t === 'routes' && !routerRoutesText) {
+                          setConfigLoading(true);
+                          getRouterRoutes(propertiesNode.name).then(r => setRouterRoutesText(r.data.routes)).catch(() => setRouterRoutesText('Failed to load')).finally(() => setConfigLoading(false));
+                        }
+                      }}
+                        style={{ flex: 1, padding: '5px 8px', fontSize: 10, fontWeight: 600, cursor: 'pointer', borderRadius: 6, border: configTab === t ? '1px solid #22c55e44' : '1px solid var(--color-border)', background: configTab === t ? '#22c55e15' : 'transparent', color: configTab === t ? '#22c55e' : 'var(--color-text-muted)', textTransform: 'capitalize' }}>
+                        {t === 'info' ? '📋 Info' : t === 'config' ? '⚙️ Config' : '🗺️ Routes'}
+                      </button>
+                    ))}
                   </div>
-                  <div style={{ fontSize: 10, color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
-                    <div>Daemons: zebra, bgpd, ospfd, staticd</div>
-                    <div style={{ marginTop: 4 }}>
-                      CLI: <code style={{ background: 'rgba(255,255,255,0.06)', padding: '1px 4px', borderRadius: 3, fontSize: 10 }}>
-                        ip netns exec {propertiesNode.name} vtysh -N {propertiesNode.name}
-                      </code>
+
+                  {configTab === 'info' && (
+                    <div style={{ padding: '8px 10px', background: 'rgba(34,197,94,0.08)', borderRadius: 6, border: '1px solid rgba(34,197,94,0.15)' }}>
+                      <div style={{ fontWeight: 600, fontSize: 11, color: '#22c55e', marginBottom: 4, display: 'flex', alignItems: 'center', gap: 4 }}>
+                        <span>🦓</span> FRR Routing Suite
+                      </div>
+                      <div style={{ fontSize: 10, color: 'var(--color-text-muted)', lineHeight: 1.6 }}>
+                        <div>Daemons: zebra, bgpd, ospfd, staticd</div>
+                        <div style={{ marginTop: 4 }}>
+                          CLI: <code style={{ background: 'rgba(255,255,255,0.06)', padding: '1px 4px', borderRadius: 3, fontSize: 10 }}>
+                            vtysh -N {propertiesNode.name}
+                          </code>
+                        </div>
+                      </div>
+                      {/* Quick config forms */}
+                      <div style={{ marginTop: 10, borderTop: '1px solid rgba(34,197,94,0.15)', paddingTop: 8 }}>
+                        <div style={{ fontWeight: 600, fontSize: 10, color: '#22c55e', marginBottom: 6 }}>Quick Configure</div>
+                        {configMsg && (
+                          <div style={{ fontSize: 10, padding: '4px 8px', borderRadius: 4, marginBottom: 6, background: configMsg.ok ? '#22c55e15' : '#ef444415', color: configMsg.ok ? '#22c55e' : '#ef4444' }}>
+                            {configMsg.text}
+                          </div>
+                        )}
+                        {/* Add BGP Neighbor */}
+                        <div style={{ marginBottom: 8 }}>
+                          <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginBottom: 3, fontWeight: 600 }}>BGP Neighbor</div>
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            <input value={bgpForm.neighbor_ip} onChange={e => setBgpForm({ ...bgpForm, neighbor_ip: e.target.value })}
+                              placeholder="IP" style={{ flex: 2, padding: '4px 6px', fontSize: 10, borderRadius: 4, border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)', outline: 'none' }} />
+                            <input value={bgpForm.remote_as} onChange={e => setBgpForm({ ...bgpForm, remote_as: e.target.value })}
+                              placeholder="AS" style={{ flex: 1, padding: '4px 6px', fontSize: 10, borderRadius: 4, border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)', outline: 'none' }} />
+                            <button onClick={() => {
+                              if (!bgpForm.neighbor_ip || !bgpForm.remote_as) return;
+                              addRouterBGPNeighbor(propertiesNode.name, { neighbor_ip: bgpForm.neighbor_ip, remote_as: Number(bgpForm.remote_as) })
+                                .then(r => { setConfigMsg({ text: r.data.message, ok: true }); setBgpForm({ neighbor_ip: '', remote_as: '' }); setRouterConfigText(''); })
+                                .catch(e => setConfigMsg({ text: e?.response?.data?.detail || 'Failed', ok: false }));
+                            }} style={{ padding: '4px 8px', fontSize: 10, borderRadius: 4, border: 'none', background: '#3b82f6', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>+</button>
+                          </div>
+                        </div>
+                        {/* Add OSPF Network */}
+                        <div>
+                          <div style={{ fontSize: 10, color: 'var(--color-text-muted)', marginBottom: 3, fontWeight: 600 }}>OSPF Network</div>
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            <input value={ospfForm.network} onChange={e => setOspfForm({ ...ospfForm, network: e.target.value })}
+                              placeholder="10.0.0.0/24" style={{ flex: 2, padding: '4px 6px', fontSize: 10, borderRadius: 4, border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)', outline: 'none' }} />
+                            <input value={ospfForm.area} onChange={e => setOspfForm({ ...ospfForm, area: e.target.value })}
+                              placeholder="area" style={{ flex: 1, padding: '4px 6px', fontSize: 10, borderRadius: 4, border: '1px solid var(--color-border)', background: 'var(--color-bg)', color: 'var(--color-text)', outline: 'none' }} />
+                            <button onClick={() => {
+                              if (!ospfForm.network) return;
+                              addRouterOSPF(propertiesNode.name, { network: ospfForm.network, area: ospfForm.area || '0' })
+                                .then(r => { setConfigMsg({ text: r.data.message, ok: true }); setOspfForm({ network: '', area: '0' }); setRouterConfigText(''); })
+                                .catch(e => setConfigMsg({ text: e?.response?.data?.detail || 'Failed', ok: false }));
+                            }} style={{ padding: '4px 8px', fontSize: 10, borderRadius: 4, border: 'none', background: '#f59e0b', color: '#fff', cursor: 'pointer', fontWeight: 600 }}>+</button>
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
+                  )}
+
+                  {configTab === 'config' && (
+                    <div style={{ position: 'relative' }}>
+                      {configLoading && <div style={{ fontSize: 11, color: 'var(--color-text-muted)', padding: 8 }}>Loading...</div>}
+                      <pre style={{ margin: 0, padding: 8, fontSize: 9, color: 'var(--color-text)', background: 'var(--color-bg)', borderRadius: 6, border: '1px solid var(--color-border)', maxHeight: 300, overflowY: 'auto', lineHeight: 1.5, fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                        {routerConfigText || 'Click to load...'}
+                      </pre>
+                      <button onClick={() => {
+                        setConfigLoading(true);
+                        getRouterConfig(propertiesNode.name).then(r => setRouterConfigText(r.data.config)).catch(() => setRouterConfigText('Failed')).finally(() => setConfigLoading(false));
+                      }} style={{ position: 'absolute', top: 4, right: 4, padding: '2px 6px', fontSize: 10, borderRadius: 4, border: '1px solid var(--color-border)', background: 'var(--color-bg-card)', color: 'var(--color-text-muted)', cursor: 'pointer' }}>↻</button>
+                    </div>
+                  )}
+
+                  {configTab === 'routes' && (
+                    <div style={{ position: 'relative' }}>
+                      {configLoading && <div style={{ fontSize: 11, color: 'var(--color-text-muted)', padding: 8 }}>Loading...</div>}
+                      <pre style={{ margin: 0, padding: 8, fontSize: 9, color: 'var(--color-text)', background: 'var(--color-bg)', borderRadius: 6, border: '1px solid var(--color-border)', maxHeight: 300, overflowY: 'auto', lineHeight: 1.5, fontFamily: 'monospace', whiteSpace: 'pre-wrap' }}>
+                        {routerRoutesText || 'Click to load...'}
+                      </pre>
+                      <button onClick={() => {
+                        setConfigLoading(true);
+                        getRouterRoutes(propertiesNode.name).then(r => setRouterRoutesText(r.data.routes)).catch(() => setRouterRoutesText('Failed')).finally(() => setConfigLoading(false));
+                      }} style={{ position: 'absolute', top: 4, right: 4, padding: '2px 6px', fontSize: 10, borderRadius: 4, border: '1px solid var(--color-border)', background: 'var(--color-bg-card)', color: 'var(--color-text-muted)', cursor: 'pointer' }}>↻</button>
+                    </div>
+                  )}
                 </div>
               )}
               {/* Connected Links */}
@@ -1139,6 +1290,66 @@ export default function TopologyPage() {
           boxShadow: '0 8px 32px rgba(0,0,0,0.3)', backdropFilter: 'blur(12px)',
         }}>
           {toast.type === 'ok' ? '✓ ' : '✗ '}{toast.msg}
+        </div>
+      )}
+
+      {/* Ping loading indicator */}
+      {pingLoading && (
+        <div style={{
+          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 100,
+          padding: '12px 24px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+          background: '#06b6d420', border: '1px solid #06b6d444', color: '#06b6d4',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.3)', backdropFilter: 'blur(12px)',
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          📡 Running ping…
+        </div>
+      )}
+
+      {/* Ping source indicator */}
+      {pingSource && !pingLoading && (
+        <div style={{
+          position: 'fixed', bottom: 24, left: '50%', transform: 'translateX(-50%)', zIndex: 100,
+          padding: '10px 20px', borderRadius: 10, fontSize: 12, fontWeight: 600,
+          background: '#06b6d415', border: '1px solid #06b6d433', color: '#06b6d4',
+          boxShadow: '0 8px 32px rgba(0,0,0,0.3)', backdropFilter: 'blur(12px)',
+          display: 'flex', alignItems: 'center', gap: 10,
+        }}>
+          📡 Ping from: <strong>{pingSource.name}</strong> — right-click target node
+          <button onClick={() => setPingSource(null)} style={{ background: 'none', border: 'none', color: '#06b6d4', cursor: 'pointer', fontSize: 14 }}>✕</button>
+        </div>
+      )}
+
+      {/* Ping result overlay */}
+      {pingResult && (
+        <div style={{
+          position: 'fixed', bottom: 24, right: 24, zIndex: 200,
+          width: 420, maxHeight: 340,
+          background: 'var(--color-bg-card)', border: `1px solid ${pingResult.success ? '#22c55e' : '#ef4444'}55`,
+          borderRadius: 12, boxShadow: '0 12px 48px rgba(0,0,0,0.5)', backdropFilter: 'blur(12px)',
+          overflow: 'hidden',
+        }}>
+          <div style={{
+            padding: '10px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+            borderBottom: '1px solid var(--color-border)',
+            background: pingResult.success ? '#22c55e10' : '#ef444410',
+          }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: pingResult.success ? '#22c55e' : '#ef4444' }}>
+              {pingResult.success ? '✓ Reachable' : '✗ Unreachable'} — {pingResult.source} → {pingResult.target}
+            </span>
+            <button onClick={() => setPingResult(null)} style={{ background: 'none', border: 'none', color: 'var(--color-text-muted)', cursor: 'pointer', fontSize: 16 }}>✕</button>
+          </div>
+          {pingResult.summary && (
+            <div style={{ padding: '8px 16px', display: 'flex', gap: 16, fontSize: 11, color: 'var(--color-text-muted)', borderBottom: '1px solid var(--color-border)' }}>
+              <span>TX: {pingResult.summary.transmitted}</span>
+              <span>RX: {pingResult.summary.received}</span>
+              <span>Loss: {pingResult.summary.loss_pct}%</span>
+              {pingResult.summary.rtt_avg != null && <span>RTT avg: {pingResult.summary.rtt_avg}ms</span>}
+            </div>
+          )}
+          <pre style={{ margin: 0, padding: 12, fontSize: 11, color: 'var(--color-text)', overflowY: 'auto', maxHeight: 220, lineHeight: 1.5, fontFamily: 'monospace' }}>
+            {pingResult.output}
+          </pre>
         </div>
       )}
 
@@ -1300,6 +1511,66 @@ export default function TopologyPage() {
         </DialogOverlay>
       )}
 
+      {/* Presets Dialog */}
+      {showPresetDialog && (
+        <DialogOverlay onClose={() => setShowPresetDialog(false)}>
+          <h3 style={{ margin: '0 0 16px', fontSize: 16, fontWeight: 700 }}>
+            <span style={{ color: '#f59e0b' }}>💾</span> Topology Presets
+          </h3>
+          {/* Save current */}
+          <div style={{ marginBottom: 16, padding: '12px', background: 'rgba(245,158,11,0.08)', borderRadius: 8, border: '1px solid rgba(245,158,11,0.2)' }}>
+            <div style={{ fontSize: 12, fontWeight: 600, color: '#f59e0b', marginBottom: 8 }}>Save Current Topology</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <input value={presetName} onChange={e => setPresetName(e.target.value)} placeholder="Preset name (e.g. bgp-lab)"
+                style={{ padding: '8px 10px', borderRadius: 6, fontSize: 13, background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)', outline: 'none' }} />
+              <input value={presetDesc} onChange={e => setPresetDesc(e.target.value)} placeholder="Description (optional)"
+                style={{ padding: '8px 10px', borderRadius: 6, fontSize: 13, background: 'var(--color-bg)', border: '1px solid var(--color-border)', color: 'var(--color-text)', outline: 'none' }} />
+              <button onClick={() => {
+                if (!presetName.trim()) return;
+                savePreset({ name: presetName.trim(), description: presetDesc })
+                  .then(r => { flash(r.data.message); setPresetName(''); setPresetDesc(''); listPresets().then(r2 => setPresets(r2.data.presets)); })
+                  .catch(e => flash(e?.response?.data?.detail || 'Failed to save', 'err'));
+              }}
+                disabled={!presetName.trim()}
+                style={{ padding: '8px 14px', borderRadius: 6, fontSize: 13, fontWeight: 600, cursor: 'pointer', background: '#f59e0b', border: 'none', color: '#fff', opacity: presetName.trim() ? 1 : 0.4 }}>
+                💾 Save Preset
+              </button>
+            </div>
+          </div>
+          {/* Saved list */}
+          <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--color-text-muted)', marginBottom: 8 }}>Saved Presets</div>
+          {presetLoading && <div style={{ fontSize: 12, color: 'var(--color-text-muted)' }}>Loading...</div>}
+          {!presetLoading && presets.length === 0 && (
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)', fontStyle: 'italic', padding: '12px 0' }}>No presets saved yet</div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 240, overflowY: 'auto' }}>
+            {presets.map(p => (
+              <div key={p.name} style={{ padding: '10px 12px', background: 'rgba(255,255,255,0.03)', borderRadius: 8, border: '1px solid var(--color-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: 13, color: 'var(--color-text)' }}>{p.name}</div>
+                  <div style={{ fontSize: 11, color: 'var(--color-text-muted)' }}>
+                    {p.description && <span>{p.description} · </span>}
+                    {p.node_count} nodes · {p.link_count} links
+                  </div>
+                </div>
+                <button onClick={() => {
+                  if (confirm(`Delete preset "${p.name}"?`)) {
+                    deletePreset(p.name)
+                      .then(() => { flash(`Preset "${p.name}" deleted`); setPresets(prev => prev.filter(x => x.name !== p.name)); })
+                      .catch(e => flash(e?.response?.data?.detail || 'Failed', 'err'));
+                  }
+                }} style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: 14, padding: '4px 8px' }} title="Delete preset">
+                  🗑
+                </button>
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'flex', gap: 8, marginTop: 16, justifyContent: 'flex-end' }}>
+            <button onClick={() => setShowPresetDialog(false)} style={{ padding: '8px 16px', borderRadius: 8, fontSize: 13, cursor: 'pointer', background: 'transparent', border: '1px solid var(--color-border)', color: 'var(--color-text)' }}>Close</button>
+          </div>
+        </DialogOverlay>
+      )}
+
       {/* Context Menu — rendered via portal at document.body for correct fixed positioning */}
       {contextMenu && createPortal(
         <>
@@ -1332,6 +1603,41 @@ export default function TopologyPage() {
                   Open CLI Terminal
                   <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--color-text-muted)' }}>↗ new tab</span>
                 </button>
+                {/* Connectivity test */}
+                {(contextMenu.node.type === 'router' || contextMenu.node.type === 'host') && (
+                  <button
+                    onClick={() => {
+                      if (pingSource && pingSource.id !== contextMenu.node.id) {
+                        // We have a source and this is the target — run ping
+                        const srcName = pingSource.name;
+                        const tgtIp = (contextMenu.node.metadata as any)?.ip?.replace(/\/\d+$/, '') || contextMenu.node.name;
+                        setPingLoading(true);
+                        setContextMenu(null);
+                        toolPing({ source: srcName, target: tgtIp, count: 4, timeout: 3 })
+                          .then(r => setPingResult({ source: srcName, target: tgtIp, output: r.data.output, success: r.data.success, summary: r.data.summary }))
+                          .catch(() => setPingResult({ source: srcName, target: tgtIp, output: 'Ping failed', success: false }))
+                          .finally(() => { setPingLoading(false); setPingSource(null); });
+                      } else {
+                        // Set this as ping source
+                        setPingSource(contextMenu.node);
+                        setContextMenu(null);
+                        flash(`Ping source: ${contextMenu.node.name} — now right-click target node`, 'ok');
+                      }
+                    }}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8, width: '100%', padding: '8px 12px',
+                      border: 'none', background: 'transparent', color: '#06b6d4', fontSize: 13,
+                      cursor: 'pointer', borderRadius: 6, textAlign: 'left',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(6,182,212,0.15)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <span style={{ fontSize: 16 }}>📡</span>
+                    {pingSource && pingSource.id !== contextMenu.node.id
+                      ? `Ping ${pingSource.name} → here`
+                      : 'Ping from here'}
+                  </button>
+                )}
               </>
             ) : (
               <>

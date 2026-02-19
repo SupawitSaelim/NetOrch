@@ -6,10 +6,12 @@ links between them — all executed live on the VM via SSH.
 
 from __future__ import annotations
 
+import json
 import logging
 import random
 import re as _re
 import string
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -856,3 +858,245 @@ async def clear_all_topology():
         "removed_namespaces": removed_namespaces,
         "errors": errors,
     }
+
+
+# ══════════════════════════════════════════════════════════════════
+# Per-Router Configuration (netns FRR instances)
+# ══════════════════════════════════════════════════════════════════
+
+_SAFE_NAME = _re.compile(r'^[a-zA-Z0-9_\-]+$')
+_SAFE_IP_CIDR = _re.compile(r'^\d{1,3}(\.\d{1,3}){3}(/\d{1,2})?$')
+
+
+def _vname(name: str) -> str:
+    """Validate router name for shell safety."""
+    if not _SAFE_NAME.match(name):
+        raise HTTPException(400, detail=f"Invalid router name: {name!r}")
+    return name
+
+
+async def _vtysh_ns(name: str, cmd: str) -> Any:
+    """Run a vtysh command inside a router's netns."""
+    _vname(name)
+    r = await ssh_exec(
+        f'ip netns exec {name} vtysh -N {name} -c "{cmd}"'
+    )
+    if r.returncode != 0:
+        raise HTTPException(500, detail=r.stderr or "vtysh command failed")
+    return r.stdout
+
+
+class RouterConfigRequest(BaseModel):
+    command: str  # raw vtysh configure command (e.g. "router bgp 65001")
+
+
+class BGPNeighborRequest(BaseModel):
+    neighbor_ip: str
+    remote_as: int
+
+
+class OSPFConfigRequest(BaseModel):
+    network: str     # e.g. "10.0.0.0/24"
+    area: str = "0"  # OSPF area
+
+
+@router.get("/routers/{name}/config")
+async def get_router_config(name: str, _: Any = Depends(get_orchestrator)):
+    """Get running config of a virtual router."""
+    _vname(name)
+    output = await _vtysh_ns(name, "show running-config")
+    return {"name": name, "config": output}
+
+
+@router.get("/routers/{name}/interfaces")
+async def get_router_interfaces(name: str, _: Any = Depends(get_orchestrator)):
+    """Get interfaces and IPs of a virtual router."""
+    _vname(name)
+    output = await _vtysh_ns(name, "show interface brief")
+    return {"name": name, "interfaces": output}
+
+
+@router.get("/routers/{name}/routes")
+async def get_router_routes(name: str, _: Any = Depends(get_orchestrator)):
+    """Get routing table of a virtual router."""
+    _vname(name)
+    output = await _vtysh_ns(name, "show ip route")
+    return {"name": name, "routes": output}
+
+
+@router.post("/routers/{name}/bgp/neighbor")
+async def add_bgp_neighbor(
+    name: str, req: BGPNeighborRequest, _: Any = Depends(get_orchestrator)
+):
+    """Add a BGP neighbor to a virtual router."""
+    _vname(name)
+    ip = req.neighbor_ip.strip()
+    if not _SAFE_IP_CIDR.match(ip):
+        raise HTTPException(400, detail=f"Invalid IP: {ip!r}")
+
+    # Get or create BGP — need ASN, try to detect from running config
+    cfg = await _vtysh_ns(name, "show running-config")
+    as_match = _re.search(r'router bgp (\d+)', cfg)
+    if not as_match:
+        raise HTTPException(
+            400,
+            detail="No BGP process configured on this router. "
+                   "Please configure BGP ASN first via CLI.",
+        )
+    local_as = as_match.group(1)
+
+    cmds = (
+        f"configure terminal\\n"
+        f"router bgp {local_as}\\n"
+        f"neighbor {ip} remote-as {req.remote_as}\\n"
+        f"end"
+    )
+    r = await ssh_exec(
+        f'ip netns exec {name} vtysh -N {name} -c "$(echo -e \'{cmds}\')"'
+    )
+    if r.returncode != 0:
+        raise HTTPException(500, detail=r.stderr or "Failed to add BGP neighbor")
+
+    return {"success": True, "message": f"Added BGP neighbor {ip} AS {req.remote_as}"}
+
+
+@router.delete("/routers/{name}/bgp/neighbor/{ip}")
+async def delete_bgp_neighbor(
+    name: str, ip: str, _: Any = Depends(get_orchestrator)
+):
+    """Remove a BGP neighbor from a virtual router."""
+    _vname(name)
+    if not _SAFE_IP_CIDR.match(ip):
+        raise HTTPException(400, detail=f"Invalid IP: {ip!r}")
+
+    cfg = await _vtysh_ns(name, "show running-config")
+    as_match = _re.search(r'router bgp (\d+)', cfg)
+    if not as_match:
+        raise HTTPException(400, detail="No BGP process on this router")
+    local_as = as_match.group(1)
+
+    cmds = (
+        f"configure terminal\\n"
+        f"router bgp {local_as}\\n"
+        f"no neighbor {ip}\\n"
+        f"end"
+    )
+    r = await ssh_exec(
+        f'ip netns exec {name} vtysh -N {name} -c "$(echo -e \'{cmds}\')"'
+    )
+    if r.returncode != 0:
+        raise HTTPException(500, detail=r.stderr or "Failed to remove BGP neighbor")
+
+    return {"success": True, "message": f"Removed BGP neighbor {ip}"}
+
+
+@router.post("/routers/{name}/ospf")
+async def configure_ospf(
+    name: str, req: OSPFConfigRequest, _: Any = Depends(get_orchestrator)
+):
+    """Add an OSPF network to a virtual router."""
+    _vname(name)
+    net = req.network.strip()
+    area = req.area.strip()
+    if not _SAFE_IP_CIDR.match(net):
+        raise HTTPException(400, detail=f"Invalid network: {net!r}")
+
+    cmds = (
+        f"configure terminal\\n"
+        f"router ospf\\n"
+        f"network {net} area {area}\\n"
+        f"end"
+    )
+    r = await ssh_exec(
+        f'ip netns exec {name} vtysh -N {name} -c "$(echo -e \'{cmds}\')"'
+    )
+    if r.returncode != 0:
+        raise HTTPException(500, detail=r.stderr or "Failed to configure OSPF")
+
+    return {"success": True, "message": f"Added OSPF network {net} area {area}"}
+
+
+# ══════════════════════════════════════════════════════════════════
+# Topology Presets — Save / Load named snapshots
+# ══════════════════════════════════════════════════════════════════
+
+_PRESETS_FILE = Path(__file__).resolve().parent.parent.parent / "presets.json"
+
+
+def _load_presets() -> dict[str, Any]:
+    if _PRESETS_FILE.exists():
+        return json.loads(_PRESETS_FILE.read_text())
+    return {}
+
+
+def _save_presets(data: dict[str, Any]) -> None:
+    _PRESETS_FILE.write_text(json.dumps(data, indent=2))
+
+
+class SavePresetRequest(BaseModel):
+    name: str
+    description: str = ""
+
+
+@router.get("/presets")
+async def list_presets():
+    """List all saved topology presets."""
+    presets = _load_presets()
+    return {
+        "presets": [
+            {
+                "name": name,
+                "description": p.get("description", ""),
+                "node_count": len(p.get("nodes", [])),
+                "link_count": len(p.get("links", [])),
+                "saved_at": p.get("saved_at", ""),
+            }
+            for name, p in presets.items()
+        ]
+    }
+
+
+@router.post("/presets")
+async def save_preset(
+    req: SavePresetRequest, orch: Orchestrator = Depends(get_orchestrator)
+):
+    """Save current topology as a named preset."""
+    name = req.name.strip()
+    if not name or not _SAFE_NAME.match(name):
+        raise HTTPException(400, detail=f"Invalid preset name: {name!r}")
+
+    topo = await orch.topology.get_topology()
+    import datetime
+    presets = _load_presets()
+    presets[name] = {
+        "description": req.description,
+        "nodes": topo.get("nodes", []),
+        "links": topo.get("links", []),
+        "saved_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    }
+    _save_presets(presets)
+
+    return {
+        "success": True,
+        "message": f"Preset '{name}' saved ({len(topo.get('nodes', []))} nodes, {len(topo.get('links', []))} links)",
+    }
+
+
+@router.delete("/presets/{name}")
+async def delete_preset(name: str):
+    """Delete a saved preset."""
+    presets = _load_presets()
+    if name not in presets:
+        raise HTTPException(404, detail=f"Preset '{name}' not found")
+    del presets[name]
+    _save_presets(presets)
+    return {"success": True, "message": f"Preset '{name}' deleted"}
+
+
+@router.get("/presets/{name}")
+async def get_preset(name: str):
+    """Get topology data for a specific preset."""
+    presets = _load_presets()
+    if name not in presets:
+        raise HTTPException(404, detail=f"Preset '{name}' not found")
+    return presets[name]
