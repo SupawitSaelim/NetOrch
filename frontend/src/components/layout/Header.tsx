@@ -90,6 +90,14 @@ export default function Header({ wsStatus = 'disconnected' }: Props) {
         >
           {theme === 'dark' ? '☀️' : '🌙'}
         </button>
+        {/* Keyboard shortcut hint */}
+        <div
+          title="Keyboard shortcuts: ⌘K Sidebar, ⌘D Dashboard, ⌘T Topology, ⌘L Labs, ⌘M Monitor, ⌘\\ Theme"
+          style={{ cursor: 'help', fontSize: 13, color: 'var(--color-text-muted)', display: 'flex', alignItems: 'center', gap: 4, padding: '3px 8px', border: '1px solid var(--color-border)', borderRadius: 6 }}
+        >
+          <span style={{ fontSize: 11, opacity: 0.7 }}>⌨</span>
+          <span style={{ fontSize: 10 }}>⌘K</span>
+        </div>
         {/* Live WebSocket indicator */}
         <div
           style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'help', position: 'relative' }}
