@@ -739,10 +739,10 @@ export default function TopologyPage() {
       d3.select(event.currentTarget as Element).select('.select-ring').attr('opacity', 1);
     });
 
-    // ── Right-click context menu (routers only) ──
+    // ── Right-click context menu (routers & hosts) ──
     nodeGs.on('contextmenu', function (event: MouseEvent, d: SimNode) {
       event.preventDefault();
-      if (d.type === 'router' && d.id.startsWith('vrouter-')) {
+      if ((d.type === 'router' && d.id.startsWith('vrouter-')) || d.type === 'host') {
         setContextMenu({ x: event.clientX, y: event.clientY, kind: 'node', node: d });
       }
     });
@@ -1584,8 +1584,9 @@ export default function TopologyPage() {
             {contextMenu.kind === 'node' ? (
               <>
                 <div style={{ padding: '6px 12px', fontSize: 11, color: 'var(--color-text-muted)', fontWeight: 600, borderBottom: '1px solid var(--color-border, #334155)' }}>
-                  🔀 {contextMenu.node.name}
+                  {contextMenu.node.type === 'router' ? '🔀' : '◉'} {contextMenu.node.name}
                 </div>
+                {contextMenu.node.type === 'router' && (
                 <button
                   onClick={() => {
                     window.open(`/terminal/router/${contextMenu.node.name}`, '_blank');
@@ -1603,6 +1604,7 @@ export default function TopologyPage() {
                   Open CLI Terminal
                   <span style={{ marginLeft: 'auto', fontSize: 10, color: 'var(--color-text-muted)' }}>↗ new tab</span>
                 </button>
+                )}
                 {/* Connectivity test */}
                 {(contextMenu.node.type === 'router' || contextMenu.node.type === 'host') && (
                   <button

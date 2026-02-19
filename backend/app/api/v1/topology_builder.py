@@ -6,6 +6,7 @@ links between them — all executed live on the VM via SSH.
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import random
@@ -1020,7 +1021,7 @@ async def configure_ospf(
 # Topology Presets — Save / Load named snapshots
 # ══════════════════════════════════════════════════════════════════
 
-_PRESETS_FILE = Path(__file__).resolve().parent.parent.parent / "presets.json"
+_PRESETS_FILE = Path(__file__).resolve().parent.parent.parent.parent / "presets.json"
 
 
 def _load_presets() -> dict[str, Any]:
@@ -1066,7 +1067,6 @@ async def save_preset(
         raise HTTPException(400, detail=f"Invalid preset name: {name!r}")
 
     topo = await orch.topology.get_topology()
-    import datetime
     presets = _load_presets()
     presets[name] = {
         "description": req.description,
