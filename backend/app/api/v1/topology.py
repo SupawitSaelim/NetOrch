@@ -18,7 +18,7 @@ async def get_topology(orch: Orchestrator = Depends(get_orchestrator)):
 
 @router.post("/refresh", response_model=TopologyResponse)
 async def refresh_topology(
-    _user: str = Depends(get_current_user),
+    _user: dict = Depends(get_current_user),
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Refresh topology from live sources (requires auth)."""
@@ -30,7 +30,7 @@ async def refresh_topology(
 async def update_node_position(
     node_id: str,
     update: NodePositionUpdate,
-    _user: str = Depends(get_current_user),
+    _user: dict = Depends(get_current_user),
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Update a node's position on the topology view (requires auth)."""

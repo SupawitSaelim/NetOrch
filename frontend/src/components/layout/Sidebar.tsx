@@ -28,6 +28,7 @@ const navItems: NavItem[] = [
   { path: '/tools', label: 'Net Tools', icon: '🏓' },
   { path: '/labs', label: 'Labs', icon: '🧪' },
   { path: '/learn', label: 'Learn', icon: '📚' },
+  { path: '/admin', label: 'Admin', icon: '🔒' },
 ];
 
 export default function Sidebar() {

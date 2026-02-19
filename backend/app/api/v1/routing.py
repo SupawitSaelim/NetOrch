@@ -40,7 +40,7 @@ async def get_routes(
 @router.post("/routes/static", status_code=status.HTTP_201_CREATED)
 async def add_static_route(
     request: StaticRouteRequest,
-    _user: str = Depends(get_current_user),
+    _user: dict = Depends(get_current_user),
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Add a static route (requires auth)."""
@@ -55,7 +55,7 @@ async def add_static_route(
 @router.delete("/routes/static/{destination:path}")
 async def delete_static_route(
     destination: str,
-    _user: str = Depends(get_current_user),
+    _user: dict = Depends(get_current_user),
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Delete a static route (requires auth)."""
@@ -98,7 +98,7 @@ async def get_bgp_neighbor(
 @router.post("/bgp/neighbors", status_code=status.HTTP_201_CREATED)
 async def add_bgp_neighbor(
     request: BGPNeighborRequest,
-    _user: str = Depends(get_current_user),
+    _user: dict = Depends(get_current_user),
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Add a BGP neighbor (requires auth)."""
@@ -118,7 +118,7 @@ async def add_bgp_neighbor(
 @router.delete("/bgp/neighbors/{neighbor_ip}")
 async def delete_bgp_neighbor(
     neighbor_ip: str,
-    _user: str = Depends(get_current_user),
+    _user: dict = Depends(get_current_user),
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Delete a BGP neighbor (requires auth)."""

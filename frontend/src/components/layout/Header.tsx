@@ -207,7 +207,7 @@ export default function Header({ wsStatus = 'disconnected' }: Props) {
                       setLoginLoading(true); setLoginError('');
                       try {
                         const res = await loginApi(loginForm.username, loginForm.password);
-                        login(res.data.access_token, loginForm.username);
+                        login(res.data.access_token, loginForm.username, res.data.role);
                         setShowLogin(false); setLoginForm({ username: '', password: '' });
                       } catch (err: any) {
                         setLoginError(err?.response?.data?.detail ?? 'Login failed');
@@ -231,7 +231,7 @@ export default function Header({ wsStatus = 'disconnected' }: Props) {
                   setLoginLoading(true); setLoginError('');
                   try {
                     const res = await loginApi(loginForm.username, loginForm.password);
-                    login(res.data.access_token, loginForm.username);
+                    login(res.data.access_token, loginForm.username, res.data.role);
                     setShowLogin(false); setLoginForm({ username: '', password: '' });
                   } catch (err: any) {
                     setLoginError(err?.response?.data?.detail ?? 'Login failed');

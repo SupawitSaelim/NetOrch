@@ -102,7 +102,7 @@ export default function RoutersPage() {
   const loginMut = useMutation({
     mutationFn: ({ u, p }: { u: string; p: string }) => loginApi(u, p),
     onSuccess: (res) => {
-      storeLogin(res.data.access_token, loginUser);
+      storeLogin(res.data.access_token, loginUser, res.data.role);
       setShowLogin(false);
       setLoginErr('');
       pendingAction?.();

@@ -51,7 +51,7 @@ async def get_flow(
 @router.post("/sdn/flows", response_model=FlowCreateResponse, status_code=status.HTTP_201_CREATED)
 async def add_flow(
     request: FlowCreateRequest,
-    _user: str = Depends(get_current_user),
+    _user: dict = Depends(get_current_user),
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Add a flow rule (requires auth)."""
@@ -62,7 +62,7 @@ async def add_flow(
 @router.delete("/sdn/flows/{flow_id}")
 async def delete_flow(
     flow_id: str,
-    _user: str = Depends(get_current_user),
+    _user: dict = Depends(get_current_user),
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Delete a flow rule (requires auth)."""
@@ -109,7 +109,7 @@ async def get_switch(
 @router.post("/switches", status_code=status.HTTP_201_CREATED)
 async def create_bridge(
     request: BridgeCreateRequest,
-    _user: str = Depends(get_current_user),
+    _user: dict = Depends(get_current_user),
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Create an OVS bridge (requires auth)."""
@@ -126,7 +126,7 @@ async def create_bridge(
 @router.delete("/switches/{name}")
 async def delete_bridge(
     name: str,
-    _user: str = Depends(get_current_user),
+    _user: dict = Depends(get_current_user),
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Delete an OVS bridge (requires auth)."""
@@ -140,7 +140,7 @@ async def delete_bridge(
 async def add_port(
     bridge_name: str,
     request: PortAddRequest,
-    _user: str = Depends(get_current_user),
+    _user: dict = Depends(get_current_user),
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Add a port to a bridge (requires auth)."""
@@ -154,7 +154,7 @@ async def add_port(
 async def create_vxlan_port(
     bridge_name: str,
     request: VxlanPortRequest,
-    _user: str = Depends(get_current_user),
+    _user: dict = Depends(get_current_user),
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Create a VXLAN tunnel port (requires auth)."""

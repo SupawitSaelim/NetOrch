@@ -116,7 +116,7 @@ async def list_vrfs(orch: Orchestrator = Depends(get_orchestrator)):
 @router.post("", status_code=status.HTTP_201_CREATED)
 async def create_vrf(
     request: VRFCreateRequest,
-    _user: str = Depends(get_current_user),
+    _user: dict = Depends(get_current_user),
 ):
     """Create a new VRF (virtual router). Requires auth."""
     if not settings.frr_enabled:
@@ -153,7 +153,7 @@ vtysh -c 'configure terminal' \
 @router.delete("/{name}")
 async def delete_vrf(
     name: str,
-    _user: str = Depends(get_current_user),
+    _user: dict = Depends(get_current_user),
 ):
     """Delete a VRF (virtual router). Requires auth."""
     if name == "default":
@@ -178,7 +178,7 @@ async def delete_vrf(
 async def configure_vrf_bgp(
     name: str,
     request: VRFBGPRequest,
-    _user: str = Depends(get_current_user),
+    _user: dict = Depends(get_current_user),
 ):
     """Configure BGP inside a VRF. Requires auth."""
     if not settings.frr_enabled:

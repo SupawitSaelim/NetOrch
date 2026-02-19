@@ -245,3 +245,26 @@ export const deletePreset = (name: string) =>
 
 export const getPreset = (name: string) =>
   client.get<{ description: string; nodes: any[]; links: any[]; saved_at: string }>(`/topology/builder/presets/${name}`);
+
+// --- Auth: User Management + RBAC ---
+export const getMe = () =>
+  client.get<{ username: string; role: string; display_name: string }>('/auth/me');
+
+export const getUsers = () =>
+  client.get<{ users: { username: string; role: string; display_name: string }[] }>('/auth/users');
+
+export const createUserApi = (data: { username: string; password: string; role?: string; display_name?: string }) =>
+  client.post<{ success: boolean; user: { username: string; role: string; display_name: string } }>('/auth/users', data);
+
+export const updateUserApi = (username: string, data: { role?: string; password?: string; display_name?: string }) =>
+  client.put<{ success: boolean; user: { username: string; role: string; display_name: string } }>(`/auth/users/${username}`, data);
+
+export const deleteUserApi = (username: string) =>
+  client.delete<{ success: boolean; message: string }>(`/auth/users/${username}`);
+
+// --- Audit Log ---
+export const getAuditLogs = (params?: { limit?: number; offset?: number; user?: string; action?: string; resource?: string }) =>
+  client.get<{ entries: { id: number; timestamp: string; user: string; role: string; action: string; resource: string; detail: string; ip: string }[]; total: number }>('/audit/logs', { params });
+
+export const clearAuditLogs = () =>
+  client.delete<{ success: boolean; cleared: number }>('/audit/logs');

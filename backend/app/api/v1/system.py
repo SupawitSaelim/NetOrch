@@ -19,7 +19,7 @@ async def get_mode():
 @router.put("/mode", response_model=SystemModeResponse)
 async def set_mode(
     request: SystemModeRequest,
-    _user: str = Depends(get_current_user),
+    _user: dict = Depends(get_current_user),
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Set system mode (requires auth)."""

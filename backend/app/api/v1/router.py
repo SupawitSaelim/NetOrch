@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter
 
+from app.api.v1.audit import router as audit_router
 from app.api.v1.auth import router as auth_router
 from app.api.v1.monitoring import router as monitoring_router
 from app.api.v1.network_tools import router as network_tools_router
@@ -23,3 +24,4 @@ router.include_router(topology_builder_router)
 router.include_router(monitoring_router)
 router.include_router(vrf_router)
 router.include_router(network_tools_router)
+router.include_router(audit_router)
