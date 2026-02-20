@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="./images/logo-256.png" alt="NetOrch Logo" width="140" />
+</p>
+
 # NetOrch — Hybrid SDN Orchestration Platform Documentation
 
 ## Overview

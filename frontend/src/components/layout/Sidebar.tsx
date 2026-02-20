@@ -1,6 +1,7 @@
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAppStore } from '../../stores/appStore';
 import { useState, useEffect } from 'react';
+import logo40 from '../../assets/logo-40.png';
 
 interface NavItem {
   path: string;
@@ -54,6 +55,32 @@ export default function Sidebar() {
         paddingTop: 16,
       }}
     >
+      {/* Sidebar Logo / Branding */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: sidebarOpen ? 'flex-start' : 'center',
+          gap: 10,
+          padding: sidebarOpen ? '8px 20px 20px' : '8px 0 20px',
+          borderBottom: '1px solid var(--color-border)',
+          marginBottom: 8,
+        }}
+      >
+        <img
+          src={logo40}
+          alt="NetOrch"
+          width={sidebarOpen ? 32 : 28}
+          height={sidebarOpen ? 32 : 28}
+          style={{ borderRadius: 6, transition: 'all 0.2s ease' }}
+        />
+        {sidebarOpen && (
+          <span style={{ fontSize: 15, fontWeight: 700, color: 'var(--color-text)' }}>
+            NetOrch
+          </span>
+        )}
+      </div>
+
       {navItems.map((item) => {
         const isTopLevel = !item.children;
         const isExpanded = expandedMenu === item.path;

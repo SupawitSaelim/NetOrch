@@ -3,6 +3,7 @@ import { getHealth, getMonitoringStats, getEvents, getTopology, getBGPSummary, g
 import { SkeletonCard, ErrorBanner } from '../../components/Shared';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import logo128 from '../../assets/logo-128.png';
 
 /* ── Stat Card ── */
 function StatCard({ label, value, color, icon, delay = 0 }: { label: string; value: string | number; color: string; icon: string; delay?: number }) {
@@ -95,10 +96,13 @@ export default function Dashboard() {
     <div>
       {/* Header */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 }}>
-        <div>
-          <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Dashboard</h2>
-          <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
-            Real-time overview of your hybrid SDN orchestration platform
+        <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+          <img src={logo128} alt="NetOrch" width={44} height={44} style={{ borderRadius: 10 }} />
+          <div>
+            <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Dashboard</h2>
+            <div style={{ fontSize: 12, color: 'var(--color-text-muted)', marginTop: 4 }}>
+              Real-time overview of your hybrid SDN orchestration platform
+            </div>
           </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 12px', borderRadius: 8, background: health.data?.status === 'healthy' ? '#22c55e10' : '#ef444410', border: `1px solid ${health.data?.status === 'healthy' ? '#22c55e' : '#ef4444'}22` }}>

@@ -1,6 +1,12 @@
-# 🔷 NetOrch — Hybrid SDN Orchestration Platform
+<p align="center">
+  <img src="docs/images/logo-512.png" alt="NetOrch Logo" width="180" />
+</p>
 
-A web-based hybrid network orchestration platform that integrates traditional IP routing (FRRouting) with Software-Defined Networking (OVS + SDN controller) through a modern React dashboard and FastAPI backend. Features an EVE-NG style topology builder, interactive terminals, educational labs, and comprehensive network management tools.
+<h1 align="center">NetOrch — Hybrid SDN Orchestration Platform</h1>
+
+<p align="center">
+  A web-based hybrid network orchestration platform that integrates traditional IP routing (FRRouting) with Software-Defined Networking (OVS + SDN controller) through a modern React dashboard and FastAPI backend. Features an EVE-NG style topology builder, interactive terminals, educational labs, and comprehensive network management tools.
+</p>
 
 ![CI](https://github.com/<owner>/NetOrch/actions/workflows/ci.yml/badge.svg)
 

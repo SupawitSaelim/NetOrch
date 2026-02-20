@@ -2,6 +2,8 @@ import { useAppStore } from '../../stores/appStore';
 import { useAuthStore } from '../../stores/authStore';
 import { login as loginApi } from '../../api/endpoints';
 import { useState } from 'react';
+import logo40 from '../../assets/logo-40.png';
+import logo64 from '../../assets/logo-64.png';
 
 type Props = { wsStatus?: 'connecting' | 'connected' | 'disconnected' };
 
@@ -53,8 +55,9 @@ export default function Header({ wsStatus = 'disconnected' }: Props) {
         >
           ☰
         </button>
+        <img src={logo40} alt="NetOrch" width={32} height={32} style={{ borderRadius: 6 }} />
         <h1 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>
-          🔷 NetOrch
+          NetOrch
         </h1>
         <span
           style={{
@@ -154,7 +157,7 @@ export default function Header({ wsStatus = 'disconnected' }: Props) {
               gap: 6,
             }}
           >
-            🔐 Login
+            � Login
           </button>
         )}
       </div>
@@ -175,7 +178,10 @@ export default function Header({ wsStatus = 'disconnected' }: Props) {
               borderRadius: 16, padding: 28, width: 360, boxShadow: '0 16px 48px rgba(0,0,0,0.5)',
             }}
           >
-            <h3 style={{ margin: '0 0 20px', fontSize: 18, fontWeight: 700 }}>🔐 Login to NetOrch</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', marginBottom: 20, gap: 12 }}>
+              <img src={logo64} alt="NetOrch" width={56} height={56} style={{ borderRadius: 10 }} />
+              <h3 style={{ margin: 0, fontSize: 18, fontWeight: 700 }}>Login to NetOrch</h3>
+            </div>
             {loginError && (
               <div style={{ background: '#ef444420', border: '1px solid #ef444444', borderRadius: 8, padding: '8px 12px', fontSize: 12, color: '#ef4444', marginBottom: 12 }}>
                 {loginError}

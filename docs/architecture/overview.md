@@ -1,5 +1,9 @@
 # Architecture Overview
 
+<p align="center">
+  <img src="../images/logo-256.png" alt="NetOrch Logo" width="120" />
+</p>
+
 ## 1. Introduction
 
 NetOrch is a web-based hybrid network orchestration platform that unifies traditional IP routing (FRRouting) with Software-Defined Networking (Open vSwitch) flow control. The backend runs on the developer's machine (macOS/Linux) and connects to a **Red Hat Enterprise Linux (RHEL) VM** via SSH to manage all networking components.
