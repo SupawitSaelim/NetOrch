@@ -225,26 +225,43 @@ class RyuService:
     def __init__(self) -> None:
         self._enabled = settings.ryu_enabled  # True = use REST API
         self._base_url = settings.ryu_url.rstrip("/")
+        # Shared HTTP client for connection reuse (keep-alive)
+        self._http: httpx.AsyncClient | None = None
+
+    def _get_client(self) -> httpx.AsyncClient:
+        """Get or create a shared httpx.AsyncClient for connection reuse."""
+        if self._http is None or self._http.is_closed:
+            self._http = httpx.AsyncClient(
+                base_url=self._base_url,
+                timeout=8.0,
+            )
+        return self._http
 
     # -- REST helpers (when ryu_enabled=True) ------------------------------
 
     async def _get(self, path: str, timeout: float = 8.0) -> Any:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.get(f"{self._base_url}{path}")
-            resp.raise_for_status()
-            return resp.json()
+        client = self._get_client()
+        resp = await client.get(path, timeout=timeout)
+        resp.raise_for_status()
+        return resp.json()
 
     async def _post(self, path: str, body: dict | None = None, timeout: float = 8.0) -> Any:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.post(f"{self._base_url}{path}", json=body or {})
-            resp.raise_for_status()
-            return resp.json()
+        client = self._get_client()
+        resp = await client.post(path, json=body or {}, timeout=timeout)
+        resp.raise_for_status()
+        return resp.json()
 
     async def _delete(self, path: str, body: dict | None = None, timeout: float = 8.0) -> Any:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            resp = await client.request("DELETE", f"{self._base_url}{path}", json=body)
-            resp.raise_for_status()
-            return resp.json()
+        client = self._get_client()
+        resp = await client.request("DELETE", path, json=body, timeout=timeout)
+        resp.raise_for_status()
+        return resp.json()
+
+    async def close(self) -> None:
+        """Close the shared HTTP client on shutdown."""
+        if self._http and not self._http.is_closed:
+            await self._http.aclose()
+            self._http = None
 
     # ======================================================================
     # SSH-based OVS operations (primary path)

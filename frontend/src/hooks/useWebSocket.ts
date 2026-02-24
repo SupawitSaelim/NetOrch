@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { useAppStore } from '../stores/appStore';
 
 type WSMessage = {
   type: 'stats' | 'topology' | 'events' | 'pong';
@@ -9,12 +10,19 @@ type WSMessage = {
 
 type WSStatus = 'connecting' | 'connected' | 'disconnected';
 
+/** Maximum reconnect delay (60s) */
+const MAX_RECONNECT_MS = 60_000;
+/** Base reconnect delay (2s) */
+const BASE_RECONNECT_MS = 2_000;
+
 export function useWebSocket() {
   const ws = useRef<WebSocket | null>(null);
   const queryClient = useQueryClient();
   const [status, setStatus] = useState<WSStatus>('disconnected');
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const mountedRef = useRef(true);
+  const retriesRef = useRef(0);
+  const setWsStatus = useAppStore((s) => s.setWsStatus);
 
   const connect = useCallback(() => {
     if (ws.current?.readyState === WebSocket.OPEN) return;
@@ -25,11 +33,14 @@ export function useWebSocket() {
     const url = `${protocol}://${host}:${window.location.port}/api/v1/ws`;
 
     setStatus('connecting');
+    setWsStatus('connecting');
     const socket = new WebSocket(url);
 
     socket.onopen = () => {
       if (!mountedRef.current) return;
       setStatus('connected');
+      setWsStatus('connected');
+      retriesRef.current = 0; // Reset backoff on successful connect
       // Send keepalive every 30s
       const ping = setInterval(() => {
         if (socket.readyState === WebSocket.OPEN) {
@@ -46,7 +57,9 @@ export function useWebSocket() {
         const msg: WSMessage = JSON.parse(event.data);
         switch (msg.type) {
           case 'stats':
+            // Update both query keys so Dashboard + MonitoringPage both get WS data
             queryClient.setQueryData(['monitoring-stats'], msg.data);
+            queryClient.setQueryData(['stats'], msg.data);
             break;
           case 'topology':
             queryClient.setQueryData(['topology'], msg.data);
@@ -68,11 +81,17 @@ export function useWebSocket() {
     socket.onclose = () => {
       if (!mountedRef.current) return;
       setStatus('disconnected');
+      setWsStatus('disconnected');
       clearInterval((socket as any)._pingInterval);
-      // Reconnect after 3s
+      // Exponential backoff reconnect: 2s, 4s, 8s, 16s, 32s, 60s (max)
+      const delay = Math.min(
+        BASE_RECONNECT_MS * Math.pow(2, retriesRef.current),
+        MAX_RECONNECT_MS,
+      );
+      retriesRef.current += 1;
       reconnectTimer.current = setTimeout(() => {
         if (mountedRef.current) connect();
-      }, 3000);
+      }, delay);
     };
 
     socket.onerror = () => {

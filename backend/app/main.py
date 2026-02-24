@@ -11,6 +11,8 @@ from app.api.v1.router import router as v1_router
 from app.api.v1.ws import router as ws_router, start_broadcast_loop, manager as ws_manager
 from app.api.v1.terminal import router as terminal_router
 from app.core.config import settings
+from app.services.ssh_utils import cleanup_control_master
+from app.services.orchestrator import orchestrator
 
 # Configure logging
 logging.basicConfig(
@@ -25,6 +27,9 @@ async def lifespan(app: FastAPI):
     start_broadcast_loop()
     ws_manager.push_event("info", "system", "Platform started — WebSocket broadcasting enabled")
     yield
+    # Cleanup resources on shutdown
+    await orchestrator.shutdown()
+    await cleanup_control_master()
 
 
 app = FastAPI(

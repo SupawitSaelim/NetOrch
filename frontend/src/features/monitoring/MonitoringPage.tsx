@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query';
 import { getMonitoringStats, getEvents } from '../../api/endpoints';
 import { useState, useRef, useEffect } from 'react';
 import { SkeletonCard as _SkeletonCard, ErrorBanner as _ErrorBanner } from '../../components/Shared';
+import { useAppStore } from '../../stores/appStore';
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -21,6 +22,7 @@ const MAX_POINTS = 30;
 
 export default function MonitoringPage() {
   const [levelFilter, setLevelFilter] = useState('');
+  const wsConnected = useAppStore((s) => s.wsStatus === 'connected');
 
   // History buffers for charts
   const cpuHistory = useRef<number[]>([]);
@@ -31,7 +33,7 @@ export default function MonitoringPage() {
   const stats = useQuery({
     queryKey: ['monitoring-stats'],
     queryFn: () => getMonitoringStats().then((r) => r.data),
-    refetchInterval: 5_000,
+    refetchInterval: wsConnected ? false : 5_000,
   });
 
   const events = useQuery({

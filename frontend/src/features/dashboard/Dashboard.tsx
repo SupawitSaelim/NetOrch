@@ -3,6 +3,7 @@ import { getHealth, getMonitoringStats, getEvents, getTopology, getBGPSummary, g
 import { SkeletonCard, ErrorBanner } from '../../components/Shared';
 import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useAppStore } from '../../stores/appStore';
 import logo128 from '../../assets/logo-128.png';
 
 /* ── Stat Card ── */
@@ -58,10 +59,15 @@ function QuickAction({ icon, label, to, color }: { icon: string; label: string; 
 
 /* ── Dashboard ── */
 export default function Dashboard() {
+  const wsConnected = useAppStore((s) => s.wsStatus === 'connected');
+
+  // When WebSocket is connected, it pushes stats/topology/events in real-time,
+  // so disable REST polling for those to avoid redundant backend load.
+  // Fallback to polling only when WS is disconnected.
   const health = useQuery({ queryKey: ['health'], queryFn: () => getHealth().then(r => r.data), refetchInterval: 10_000 });
-  const stats = useQuery({ queryKey: ['stats'], queryFn: () => getMonitoringStats().then(r => r.data), refetchInterval: 5_000 });
-  const events = useQuery({ queryKey: ['events'], queryFn: () => getEvents(undefined, 20).then(r => r.data), refetchInterval: 15_000 });
-  const topo = useQuery({ queryKey: ['topology'], queryFn: () => getTopology().then(r => r.data), refetchInterval: 30_000 });
+  const stats = useQuery({ queryKey: ['stats'], queryFn: () => getMonitoringStats().then(r => r.data), refetchInterval: wsConnected ? false : 5_000 });
+  const events = useQuery({ queryKey: ['events'], queryFn: () => getEvents(undefined, 20).then(r => r.data), refetchInterval: wsConnected ? false : 15_000 });
+  const topo = useQuery({ queryKey: ['topology'], queryFn: () => getTopology().then(r => r.data), refetchInterval: wsConnected ? false : 30_000 });
   const bgp = useQuery({ queryKey: ['bgp-summary'], queryFn: () => getBGPSummary().then(r => r.data), refetchInterval: 15_000 });
   const routesQ = useQuery({ queryKey: ['routes'], queryFn: () => getRoutes().then(r => r.data), refetchInterval: 15_000 });
 

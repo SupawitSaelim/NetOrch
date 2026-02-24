@@ -69,41 +69,59 @@ _bg_task: asyncio.Task | None = None
 
 
 async def _broadcast_loop():
-    """Background coroutine: collect stats & push to clients every 5 seconds."""
+    """Background coroutine: broadcast stats, topology, and events to WS clients.
+
+    Uses staggered intervals to reduce backend load:
+    - Stats: every 5 seconds (cached 10s TTL)
+    - Topology: every 15 seconds (cached 30s TTL)
+    - Events: every 10 seconds (in-memory, no SSH)
+    """
     from app.api.deps import get_orchestrator
 
     orch = get_orchestrator()
     logger.info("WebSocket broadcast loop started")
 
+    tick = 0  # Counter for staggered broadcasts
+
     while True:
         try:
             await asyncio.sleep(5)
             if not manager.active_connections:
+                tick = 0
                 continue
 
-            # Gather monitoring data
-            stats = await orch.get_monitoring_stats()
-            topo = await orch.topology.get_topology()
-            topo_dict = {
-                "nodes": [n.model_dump() for n in topo["nodes"]],
-                "links": [ln.model_dump() for ln in topo["links"]],
-            }
+            tick += 1
+            now = datetime.now(timezone.utc).isoformat()
 
+            # Stats: every tick (5s) — uses 10s TTL cache
+            stats = await orch.get_monitoring_stats()
             await manager.broadcast({
                 "type": "stats",
                 "data": stats,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
+                "timestamp": now,
             })
-            await manager.broadcast({
-                "type": "topology",
-                "data": topo_dict,
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            })
-            await manager.broadcast({
-                "type": "events",
-                "data": manager.events[:50],
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            })
+
+            # Topology: every 3rd tick (15s) — uses 30s TTL cache
+            if tick % 3 == 0:
+                topo = await orch.get_topology_cached()
+                # topology data is already dicts from TopologyService._discover()
+                topo_dict = {
+                    "nodes": topo.get("nodes", []),
+                    "links": topo.get("links", []),
+                }
+                await manager.broadcast({
+                    "type": "topology",
+                    "data": topo_dict,
+                    "timestamp": now,
+                })
+
+            # Events: every 2nd tick (10s) — in-memory, no SSH cost
+            if tick % 2 == 0:
+                await manager.broadcast({
+                    "type": "events",
+                    "data": manager.events[:50],
+                    "timestamp": now,
+                })
         except asyncio.CancelledError:
             break
         except Exception as exc:

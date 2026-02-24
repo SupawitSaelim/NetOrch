@@ -1,7 +1,13 @@
-"""Main orchestrator service - coordinates all sub-services."""
+"""Main orchestrator service - coordinates all sub-services.
 
+Includes time-based caching for expensive operations to reduce
+redundant SSH calls, especially from WebSocket broadcast loops.
+"""
+
+import asyncio
 import logging
 import time
+from typing import Any
 
 from app.core.config import settings
 from app.services.frr_service import FRRService
@@ -10,6 +16,43 @@ from app.services.ryu_service import RyuService
 from app.services.topology_service import TopologyService
 
 logger = logging.getLogger(__name__)
+
+
+class _CachedResult:
+    """Simple TTL cache for a single async result."""
+
+    __slots__ = ("_data", "_timestamp", "_ttl", "_lock")
+
+    def __init__(self, ttl: float):
+        self._data: Any = None
+        self._timestamp: float = 0.0
+        self._ttl = ttl
+        self._lock = asyncio.Lock()
+
+    @property
+    def is_valid(self) -> bool:
+        return self._data is not None and (time.time() - self._timestamp) < self._ttl
+
+    @property
+    def data(self) -> Any:
+        return self._data
+
+    async def get_or_fetch(self, fetch_fn) -> Any:
+        """Return cached result if still valid, otherwise call fetch_fn."""
+        if self.is_valid:
+            return self._data
+        async with self._lock:
+            # Double-check after acquiring lock
+            if self.is_valid:
+                return self._data
+            self._data = await fetch_fn()
+            self._timestamp = time.time()
+            return self._data
+
+    def invalidate(self) -> None:
+        """Force cache invalidation."""
+        self._data = None
+        self._timestamp = 0.0
 
 
 class Orchestrator:
@@ -23,6 +66,11 @@ class Orchestrator:
         self._start_time = time.time()
         self._request_count = 0
 
+        # ── TTL caches ──
+        self._stats_cache = _CachedResult(ttl=10.0)   # 10s TTL for monitoring stats
+        self._topo_cache = _CachedResult(ttl=30.0)     # 30s TTL for topology
+        self._health_cache = _CachedResult(ttl=15.0)   # 15s TTL for health checks
+
     @property
     def uptime(self) -> int:
         return int(time.time() - self._start_time)
@@ -34,13 +82,28 @@ class Orchestrator:
     def request_count(self) -> int:
         return self._request_count
 
+    def invalidate_caches(self) -> None:
+        """Force invalidation of all caches (after topology mutations, etc.)."""
+        self._stats_cache.invalidate()
+        self._topo_cache.invalidate()
+        self._health_cache.invalidate()
+
     async def get_health(self) -> dict:
-        """Check health of all components."""
+        """Check health of all components (cached)."""
+        return await self._health_cache.get_or_fetch(self._fetch_health)
+
+    async def _fetch_health(self) -> dict:
+        """Fetch health from all services in parallel."""
+        frr_status, ryu_status, ovs_status = await asyncio.gather(
+            self.frr.get_status(),
+            self.ryu.get_status(),
+            self.ovs.get_status(),
+        )
         return {
             "api": "up",
-            "frr": await self.frr.get_status(),
-            "ryu": await self.ryu.get_status(),
-            "ovs": await self.ovs.get_status(),
+            "frr": frr_status,
+            "ryu": ryu_status,
+            "ovs": ovs_status,
         }
 
     async def get_system_info(self) -> dict:
@@ -55,13 +118,22 @@ class Orchestrator:
         }
 
     async def get_monitoring_stats(self) -> dict:
-        """Aggregate monitoring statistics from all services."""
-        routes = await self.frr.get_routing_table()
-        bgp_neighbors = await self.frr.get_bgp_neighbors()
-        ospf_neighbors = await self.frr.get_ospf_neighbors()
-        flows = await self.ryu.get_flows()
-        switches = await self.ryu.get_switches()
-        bridges = await self.ovs.list_bridges()
+        """Aggregate monitoring statistics from all services (cached)."""
+        return await self._stats_cache.get_or_fetch(self._fetch_monitoring_stats)
+
+    async def _fetch_monitoring_stats(self) -> dict:
+        """Fetch stats from all services using asyncio.gather for parallelism."""
+        # Run all 6 independent calls in parallel instead of sequentially
+        routes, bgp_neighbors, ospf_neighbors, flows, switches, bridges = (
+            await asyncio.gather(
+                self.frr.get_routing_table(),
+                self.frr.get_bgp_neighbors(),
+                self.frr.get_ospf_neighbors(),
+                self.ryu.get_flows(),
+                self.ryu.get_switches(),
+                self.ovs.list_bridges(),
+            )
+        )
 
         # Try to get real CPU/memory from VM
         cpu_usage = 12.5
@@ -98,6 +170,14 @@ class Orchestrator:
                 },
             },
         }
+
+    async def get_topology_cached(self) -> dict:
+        """Get topology with caching (for WS broadcast)."""
+        return await self._topo_cache.get_or_fetch(self.topology.get_topology)
+
+    async def shutdown(self) -> None:
+        """Cleanup resources on application shutdown."""
+        await self.ryu.close()
 
 
 # Singleton instance

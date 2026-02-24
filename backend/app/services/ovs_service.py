@@ -6,6 +6,7 @@ When enabled, executes ovs-vsctl / ovs-ofctl on the Red Hat VM via SSH.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from typing import Any
 
@@ -54,16 +55,22 @@ class OVSService:
                 logger.error("ovs-vsctl list-br failed: %s", result.stderr)
                 return []
 
-            bridges: list[dict] = []
-            for name in result.stdout.splitlines():
-                name = name.strip()
-                if not name:
-                    continue
-                ports_r = await ovs_exec(f"ovs-vsctl list-ports {name}")
-                dpid_r = await ovs_exec(f"ovs-vsctl get bridge {name} datapath_id")
-                ctrl_r = await ovs_exec(f"ovs-vsctl get-controller {name}")
-                bridges.append(_parse_bridge_info(name, ports_r.stdout, dpid_r.stdout, ctrl_r.stdout))
-            return bridges
+            bridge_names = [n.strip() for n in result.stdout.splitlines() if n.strip()]
+            if not bridge_names:
+                return []
+
+            # Fetch ports, dpid, and controller for ALL bridges in parallel
+            # instead of 3 sequential SSH calls per bridge
+            async def _fetch_bridge(name: str) -> dict:
+                ports_r, dpid_r, ctrl_r = await asyncio.gather(
+                    ovs_exec(f"ovs-vsctl list-ports {name}"),
+                    ovs_exec(f"ovs-vsctl get bridge {name} datapath_id"),
+                    ovs_exec(f"ovs-vsctl get-controller {name}"),
+                )
+                return _parse_bridge_info(name, ports_r.stdout, dpid_r.stdout, ctrl_r.stdout)
+
+            bridges = await asyncio.gather(*[_fetch_bridge(n) for n in bridge_names])
+            return list(bridges)
         except Exception as exc:
             logger.error("list_bridges error: %s", exc)
             return []
