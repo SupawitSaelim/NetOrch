@@ -13,8 +13,15 @@ logger = logging.getLogger(__name__)
 
 AUDIT_FILE = os.path.join(os.path.dirname(__file__), "..", "..", "data", "audit.jsonl")
 
-# In-memory ring buffer (most recent 500 entries)
-_MAX_ENTRIES = 500
+# In-memory ring buffer (configurable via AUDIT_MAX_ENTRIES env)
+def _get_max_entries() -> int:
+    try:
+        from app.core.config import settings
+        return settings.audit_max_entries
+    except Exception:
+        return 500
+
+_MAX_ENTRIES = _get_max_entries()
 _log: deque[dict[str, Any]] = deque(maxlen=_MAX_ENTRIES)
 _counter = 0
 

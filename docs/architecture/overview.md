@@ -36,7 +36,7 @@ NetOrch is a web-based hybrid network orchestration platform that unifies tradit
 │  └───────────────────────────────────────────────────────────────┘  │
 └─────────────────────────────────────────────────────────────────────┘
            │                    │                    │
-           │ SSH (paramiko)     │ SSH (paramiko)     │ SSH (paramiko)
+           │ SSH (asyncio)     │ SSH (asyncio)     │ SSH (asyncio)
            ▼                    ▼                    ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                RHEL VM — Network Node (192.168.64.3)                 │

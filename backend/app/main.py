@@ -21,9 +21,21 @@ logging.basicConfig(
 )
 
 
+logger = logging.getLogger(__name__)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Startup / shutdown lifecycle."""
+    # Security warnings
+    if not settings.is_production:
+        logger.warning(
+            "⚠️  Running with default SECRET_KEY — set SECRET_KEY env var for production!"
+        )
+    if settings.admin_password == "admin123":
+        logger.warning(
+            "⚠️  Default admin password in use — set ADMIN_PASSWORD env var!"
+        )
     start_broadcast_loop()
     ws_manager.push_event("info", "system", "Platform started — WebSocket broadcasting enabled")
     yield
@@ -41,15 +53,10 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
-# CORS - allow frontend dev server
+# CORS - configurable via CORS_ORIGINS env var
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",  # Vite dev server
-        "http://localhost:3000",
-        "http://127.0.0.1:5173",
-        "http://127.0.0.1:3000",
-    ],
+    allow_origins=settings.cors_origin_list,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

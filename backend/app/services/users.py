@@ -93,6 +93,14 @@ def list_users() -> list[dict[str, Any]]:
     ]
 
 
+def _validate_password(password: str) -> None:
+    """Validate password complexity."""
+    from app.core.config import settings
+    min_len = settings.min_password_length
+    if len(password) < min_len:
+        raise ValueError(f"Password must be at least {min_len} characters")
+
+
 def create_user(
     username: str,
     password: str,
@@ -103,6 +111,9 @@ def create_user(
     _bootstrap_default_admin()
     if role not in VALID_ROLES:
         raise ValueError(f"Invalid role: {role}. Must be one of {VALID_ROLES}")
+    if not username or not username.strip():
+        raise ValueError("Username cannot be empty")
+    _validate_password(password)
     users = _load_users()
     if username in users:
         raise ValueError(f"User '{username}' already exists")
@@ -133,6 +144,7 @@ def update_user(
             raise ValueError(f"Invalid role: {role}. Must be one of {VALID_ROLES}")
         users[username]["role"] = role
     if password is not None:
+        _validate_password(password)
         users[username]["password_hash"] = get_password_hash(password)
     if display_name is not None:
         users[username]["display_name"] = display_name

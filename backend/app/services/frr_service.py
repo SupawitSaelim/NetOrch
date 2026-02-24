@@ -6,6 +6,7 @@ When enabled, executes vtysh commands on the Red Hat VM via SSH.
 
 from __future__ import annotations
 
+import copy
 import logging
 import re
 from typing import Any
@@ -123,6 +124,9 @@ class FRRService:
         self._enabled = settings.frr_enabled
         self._vtysh_path = settings.frr_vtysh_path
         self._mock_static_routes: list[dict[str, Any]] = []
+        # Instance-level copies of mock data to prevent cross-request leaks
+        self._mock_bgp_neighbors: list[dict[str, Any]] = copy.deepcopy(MOCK_BGP_NEIGHBORS)
+        self._mock_ospf_neighbors: list[dict[str, Any]] = copy.deepcopy(MOCK_OSPF_NEIGHBORS)
 
     # -- Routing table -----------------------------------------------------
 
@@ -159,7 +163,7 @@ class FRRService:
             neighbors = await self.get_bgp_neighbors()
             established = sum(1 for n in neighbors if n["state"] == "Established")
             return {
-                "local_as": 65001, "router_id": "10.0.0.1",
+                "local_as": settings.frr_default_asn, "router_id": "10.0.0.1",
                 "total_neighbors": len(neighbors), "established": established,
                 "neighbors": [
                     {"neighbor": n["neighbor"], "remote_as": n["remote_as"],
@@ -185,7 +189,7 @@ class FRRService:
     async def get_bgp_neighbors(self) -> list[dict]:
         """Get BGP neighbor details."""
         if not self._enabled:
-            return MOCK_BGP_NEIGHBORS
+            return copy.deepcopy(self._mock_bgp_neighbors)
 
         summary = await self.get_bgp_summary()
         return [
@@ -197,7 +201,7 @@ class FRRService:
     async def add_bgp_neighbor(self, config: dict) -> bool:
         """Add BGP neighbor."""
         if not self._enabled:
-            MOCK_BGP_NEIGHBORS.append({
+            self._mock_bgp_neighbors.append({
                 "neighbor": config["neighbor"], "remote_as": config["remote_as"],
                 "description": config.get("description", ""), "state": "Idle",
                 "uptime": "00:00:00", "local_address": "10.0.0.1", "local_port": 179,
@@ -209,7 +213,7 @@ class FRRService:
         try:
             cmds = (
                 f'vtysh -c "configure terminal" '
-                f'-c "router bgp 65001" '
+                f'-c "router bgp {settings.frr_default_asn}" '
                 f'-c "neighbor {config["neighbor"]} remote-as {config["remote_as"]}" '
             )
             desc = config.get("description")
@@ -228,13 +232,13 @@ class FRRService:
     async def delete_bgp_neighbor(self, neighbor_ip: str) -> bool:
         """Delete BGP neighbor."""
         if not self._enabled:
-            orig = len(MOCK_BGP_NEIGHBORS)
-            MOCK_BGP_NEIGHBORS[:] = [n for n in MOCK_BGP_NEIGHBORS if n["neighbor"] != neighbor_ip]
-            return len(MOCK_BGP_NEIGHBORS) < orig
+            orig = len(self._mock_bgp_neighbors)
+            self._mock_bgp_neighbors[:] = [n for n in self._mock_bgp_neighbors if n["neighbor"] != neighbor_ip]
+            return len(self._mock_bgp_neighbors) < orig
 
         try:
             result = await ssh_exec(
-                f'vtysh -c "configure terminal" -c "router bgp 65001" '
+                f'vtysh -c "configure terminal" -c "router bgp {settings.frr_default_asn}" '
                 f'-c "no neighbor {neighbor_ip}" -c "exit" -c "exit"'
             )
             return result.returncode == 0
@@ -306,7 +310,7 @@ class FRRService:
     async def get_ospf_neighbors(self) -> list[dict]:
         """Get OSPF neighbors."""
         if not self._enabled:
-            return MOCK_OSPF_NEIGHBORS
+            return copy.deepcopy(self._mock_ospf_neighbors)
 
         try:
             result = await vtysh_exec("show ip ospf neighbor")

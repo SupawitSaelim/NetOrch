@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 from app.core.config import settings
 from app.core.security import create_access_token
+from app.core.rate_limit import login_limiter
 from app.api.deps import get_current_user, require_role
 from app.schemas.common import LoginRequest, TokenResponse
 from app.services import users as user_store
@@ -22,6 +23,8 @@ router = APIRouter(prefix="/auth", tags=["Authentication"])
 @router.post("/login", response_model=TokenResponse)
 async def login(request: LoginRequest, req: Request):
     """Authenticate and receive a JWT token."""
+    client_ip = req.client.host if req.client else "unknown"
+    login_limiter.check(client_ip)
     user = user_store.authenticate(request.username, request.password)
     if user is None:
         audit.record(
@@ -36,6 +39,7 @@ async def login(request: LoginRequest, req: Request):
         )
 
     role = user.get("role", "viewer")
+    login_limiter.reset(client_ip)  # reset on successful login
     token = create_access_token(
         subject=request.username,
         role=role,

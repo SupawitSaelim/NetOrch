@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from app.api.deps import get_current_user, get_orchestrator
+from app.core.validators import validate_ip, validate_asn, validate_description
 from app.schemas.common import SuccessResponse
 from app.schemas.routing import (
     BGPNeighborListResponse,
@@ -44,9 +45,11 @@ async def add_static_route(
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Add a static route (requires auth)."""
+    dest = validate_ip(request.destination, "destination")
+    nh = validate_ip(request.next_hop, "next_hop")
     route = await orch.frr.add_static_route(
-        destination=request.destination,
-        next_hop=request.next_hop,
+        destination=dest,
+        next_hop=nh,
         metric=request.metric,
     )
     return StaticRouteResponse(success=True, route=route)
@@ -59,6 +62,7 @@ async def delete_static_route(
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Delete a static route (requires auth)."""
+    destination = validate_ip(destination, "destination")
     deleted = await orch.frr.delete_static_route(destination)
     if not deleted:
         raise HTTPException(status_code=404, detail="Route not found")
@@ -88,6 +92,7 @@ async def get_bgp_neighbor(
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Get a specific BGP neighbor."""
+    neighbor_ip = validate_ip(neighbor_ip, "neighbor_ip")
     neighbors = await orch.frr.get_bgp_neighbors()
     neighbor = next((n for n in neighbors if n["neighbor"] == neighbor_ip), None)
     if not neighbor:
@@ -102,6 +107,10 @@ async def add_bgp_neighbor(
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Add a BGP neighbor (requires auth)."""
+    validate_ip(request.neighbor, "neighbor")
+    validate_asn(request.remote_as, "remote_as")
+    if request.description:
+        validate_description(request.description)
     success = await orch.frr.add_bgp_neighbor(request.model_dump())
     if not success:
         raise HTTPException(status_code=500, detail="Failed to add neighbor")
@@ -122,6 +131,7 @@ async def delete_bgp_neighbor(
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Delete a BGP neighbor (requires auth)."""
+    neighbor_ip = validate_ip(neighbor_ip, "neighbor_ip")
     deleted = await orch.frr.delete_bgp_neighbor(neighbor_ip)
     if not deleted:
         raise HTTPException(status_code=404, detail="Neighbor not found")

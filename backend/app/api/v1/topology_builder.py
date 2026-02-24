@@ -19,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from app.api.deps import get_orchestrator
+from app.core.validators import SAFE_NAME as _SAFE_NAME, SAFE_IP as _SAFE_IP_CIDR
 from app.services.orchestrator import Orchestrator
 from app.services.ssh_utils import ssh_exec, ovs_exec
 
@@ -865,8 +866,7 @@ async def clear_all_topology():
 # Per-Router Configuration (netns FRR instances)
 # ══════════════════════════════════════════════════════════════════
 
-_SAFE_NAME = _re.compile(r'^[a-zA-Z0-9_\-]+$')
-_SAFE_IP_CIDR = _re.compile(r'^\d{1,3}(\.\d{1,3}){3}(/\d{1,2})?$')
+# _SAFE_NAME and _SAFE_IP_CIDR imported from app.core.validators
 
 
 def _vname(name: str) -> str:

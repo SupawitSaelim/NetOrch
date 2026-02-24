@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 
 from app.api.deps import get_current_user, get_orchestrator
+from app.core.validators import validate_name, validate_ip, validate_asn
 from app.services.orchestrator import Orchestrator
 from app.services.ssh_utils import ssh_exec, vtysh_exec
 from app.core.config import settings
@@ -122,7 +123,7 @@ async def create_vrf(
     if not settings.frr_enabled:
         return {"success": True, "message": f"VRF {request.name} created (mock)"}
 
-    name = request.name
+    name = validate_name(request.name, "VRF name")
     tid = request.table_id
 
     # 1. Create Linux VRF device
@@ -156,6 +157,7 @@ async def delete_vrf(
     _user: dict = Depends(get_current_user),
 ):
     """Delete a VRF (virtual router). Requires auth."""
+    name = validate_name(name, "VRF name")
     if name == "default":
         raise HTTPException(400, detail="Cannot delete the default VRF")
 
@@ -181,6 +183,12 @@ async def configure_vrf_bgp(
     _user: dict = Depends(get_current_user),
 ):
     """Configure BGP inside a VRF. Requires auth."""
+    name = validate_name(name, "VRF name")
+    validate_asn(request.asn, "ASN")
+    if request.router_id:
+        validate_ip(request.router_id, "router_id")
+    for net in request.networks:
+        validate_ip(net, "network")
     if not settings.frr_enabled:
         return {"success": True, "message": f"BGP AS{request.asn} configured in VRF {name} (mock)"}
 
@@ -210,6 +218,7 @@ async def get_vrf_routes(
     orch: Orchestrator = Depends(get_orchestrator),
 ):
     """Get routes for a specific VRF."""
+    name = validate_name(name, "VRF name")
     if not settings.frr_enabled:
         return {"routes": [], "total": 0}
 

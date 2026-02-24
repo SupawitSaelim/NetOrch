@@ -77,15 +77,17 @@ async def _broadcast_loop():
     - Events: every 10 seconds (in-memory, no SSH)
     """
     from app.api.deps import get_orchestrator
+    from app.core.config import settings as _settings
 
     orch = get_orchestrator()
-    logger.info("WebSocket broadcast loop started")
+    interval = _settings.ws_broadcast_interval
+    logger.info("WebSocket broadcast loop started (interval=%.1fs)", interval)
 
     tick = 0  # Counter for staggered broadcasts
 
     while True:
         try:
-            await asyncio.sleep(5)
+            await asyncio.sleep(interval)
             if not manager.active_connections:
                 tick = 0
                 continue
@@ -139,7 +141,20 @@ def start_broadcast_loop():
 
 @router.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
-    """Main WebSocket endpoint for real-time updates."""
+    """Main WebSocket endpoint for real-time updates.
+
+    Supports optional JWT authentication via query parameter:
+    ws://host/api/v1/ws?token=<jwt_token>
+    """
+    # Optional auth — allow unauthenticated for read-only broadcast
+    token = ws.query_params.get("token")
+    if token:
+        from app.core.security import verify_token
+        user_info = verify_token(token)
+        if user_info is None:
+            await ws.close(code=4001, reason="Invalid token")
+            return
+
     await manager.connect(ws)
     try:
         while True:

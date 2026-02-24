@@ -56,7 +56,21 @@ async def terminal_ws(ws: WebSocket):
 
     The browser sends keystrokes; we forward them to an SSH session
     and stream stdout back.
+
+    Requires JWT authentication via query parameter:
+    ws://host/api/v1/ws/terminal?token=<jwt_token>
     """
+    # Require authentication for terminal access (SSH to VM)
+    token = ws.query_params.get("token")
+    if not token:
+        await ws.close(code=4001, reason="Authentication required")
+        return
+    from app.core.security import verify_token
+    user_info = verify_token(token)
+    if user_info is None:
+        await ws.close(code=4001, reason="Invalid or expired token")
+        return
+
     await ws.accept()
 
     # Parse optional query params

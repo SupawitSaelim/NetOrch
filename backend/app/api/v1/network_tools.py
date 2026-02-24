@@ -8,6 +8,11 @@ import re
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
 
+from app.core.validators import (
+    SAFE_NAME, SAFE_IP, SAFE_BPF,
+    validate_name as _validate_name_shared,
+    validate_target as _validate_target_shared,
+)
 from app.services.ssh_utils import ssh_exec
 
 logger = logging.getLogger(__name__)
@@ -45,23 +50,19 @@ class CaptureRequest(BaseModel):
 
 # ── Validation ───────────────────────────────────────────────────
 
-_SAFE_NAME = re.compile(r'^[a-zA-Z0-9_\-]+$')
-_SAFE_IP = re.compile(r'^[a-zA-Z0-9._:\-]+$')
-_SAFE_BPF = re.compile(r'^[a-zA-Z0-9 ._:\-/()!=<>&|]+$')
+# ── Validation (uses shared validators from app.core.validators) ─
+
+_SAFE_NAME = SAFE_NAME
+_SAFE_IP = SAFE_IP
+_SAFE_BPF = SAFE_BPF
 
 
 def _validate_name(name: str, field: str = "name") -> str:
-    name = name.strip()
-    if not name or not _SAFE_NAME.match(name):
-        raise HTTPException(400, detail=f"Invalid {field}: {name!r}")
-    return name
+    return _validate_name_shared(name, field)
 
 
 def _validate_target(target: str) -> str:
-    target = target.strip()
-    if not target or not _SAFE_IP.match(target):
-        raise HTTPException(400, detail=f"Invalid target: {target!r}")
-    return target
+    return _validate_target_shared(target, "target")
 
 
 # ── Ping ─────────────────────────────────────────────────────────

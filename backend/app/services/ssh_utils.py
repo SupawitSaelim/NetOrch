@@ -66,7 +66,7 @@ async def _ensure_control_master() -> None:
             "-o", "ServerAliveCountMax=3",
             "-o", f"ControlMaster=yes",
             "-o", f"ControlPath={_CONTROL_PATH}",
-            "-o", "ControlPersist=300",  # Keep master alive 5 minutes
+            "-o", f"ControlPersist={settings.ssh_control_persist}",  # configurable
             "-i", ssh_key,
             "-N",  # No command, just establish connection
             "-f",  # Go to background
@@ -85,7 +85,7 @@ async def _ensure_control_master() -> None:
             )
 
 
-async def ssh_exec(command: str, timeout: int = 15) -> CmdResult:
+async def ssh_exec(command: str, timeout: int | None = None) -> CmdResult:
     """Execute a command on the VM via SSH.
 
     Uses ControlMaster for connection reuse when available,
@@ -93,6 +93,8 @@ async def ssh_exec(command: str, timeout: int = 15) -> CmdResult:
 
     Returns CmdResult with stdout, stderr, and return code.
     """
+    if timeout is None:
+        timeout = settings.ssh_timeout
     ssh_key = os.path.expanduser(settings.vm_ssh_key)
 
     # Try to use ControlMaster for faster connections

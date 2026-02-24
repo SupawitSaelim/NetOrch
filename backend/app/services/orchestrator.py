@@ -66,10 +66,11 @@ class Orchestrator:
         self._start_time = time.time()
         self._request_count = 0
 
-        # ── TTL caches ──
-        self._stats_cache = _CachedResult(ttl=10.0)   # 10s TTL for monitoring stats
-        self._topo_cache = _CachedResult(ttl=30.0)     # 30s TTL for topology
-        self._health_cache = _CachedResult(ttl=15.0)   # 15s TTL for health checks
+        # ── TTL caches (configurable via env) ──
+        from app.core.config import settings
+        self._stats_cache = _CachedResult(ttl=settings.cache_stats_ttl)
+        self._topo_cache = _CachedResult(ttl=settings.cache_topology_ttl)
+        self._health_cache = _CachedResult(ttl=settings.cache_health_ttl)
 
     @property
     def uptime(self) -> int:

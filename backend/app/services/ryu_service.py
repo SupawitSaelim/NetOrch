@@ -1,8 +1,11 @@
-"""SDN Controller / Ryu service — manages OVS flows via SSH.
+"""SDN Flow management service — manages OVS flows via SSH.
 
 Connects to the Red Hat VM over SSH to run ovs-vsctl / ovs-ofctl commands
 directly, giving full integration with the Topology Builder's switches.
 When ``ryu_enabled=True`` it can optionally proxy through a REST API.
+
+Historical note: originally named RyuService after the Ryu SDN controller.
+Renamed to SDNFlowService to reflect that SSH-based ovs-ofctl is the primary path.
 """
 
 from __future__ import annotations
@@ -219,8 +222,8 @@ def _normalize_flow(raw: dict, bridge: str = "br0", idx: int = 0) -> dict:
 # ---------------------------------------------------------------------------
 # Service class
 # ---------------------------------------------------------------------------
-class RyuService:
-    """Interface to OVS on the VM (via SSH, or optionally via REST API)."""
+class SDNFlowService:
+    """SDN Flow management — interface to OVS on the VM (SSH + optional REST)."""
 
     def __init__(self) -> None:
         self._enabled = settings.ryu_enabled  # True = use REST API
@@ -508,3 +511,7 @@ class RyuService:
             return "up" if r.returncode == 0 and r.stdout else "down"
         except Exception:
             return "down"
+
+
+# Backward-compatible alias (legacy name)
+RyuService = SDNFlowService

@@ -117,131 +117,140 @@ class TopologyService:
 
             # ---- Pre-scan: identify VRouter namespaces (ip_forward=1) ----
             vrouter_names: set[str] = set()
-            ns_pre = await ssh_exec("ip netns list 2>/dev/null")
-            if ns_pre.returncode == 0:
-                for ns_line in ns_pre.stdout.splitlines():
-                    ns_name = ns_line.split()[0].strip() if ns_line.strip() else ""
-                    if ns_name:
-                        fwd_r = await ssh_exec(
-                            f"ip netns exec {ns_name} sysctl -n net.ipv4.ip_forward 2>/dev/null"
-                        )
-                        if fwd_r.returncode == 0 and fwd_r.stdout.strip() == "1":
-                            vrouter_names.add(ns_name)
+            try:
+                ns_pre = await ssh_exec("ip netns list 2>/dev/null")
+                if ns_pre.returncode == 0:
+                    for ns_line in ns_pre.stdout.splitlines():
+                        ns_name = ns_line.split()[0].strip() if ns_line.strip() else ""
+                        if ns_name:
+                            try:
+                                fwd_r = await ssh_exec(
+                                    f"ip netns exec {ns_name} sysctl -n net.ipv4.ip_forward 2>/dev/null"
+                                )
+                                if fwd_r.returncode == 0 and fwd_r.stdout.strip() == "1":
+                                    vrouter_names.add(ns_name)
+                            except Exception:
+                                logger.warning("Failed to check ip_forward for namespace %s", ns_name)
+            except Exception:
+                logger.warning("Failed to list network namespaces")
 
             for idx, br_name in enumerate(bridge_names):
-                dpid_r = await ovs_exec(f"ovs-vsctl get bridge {br_name} datapath_id")
-                dpid = dpid_r.stdout.strip().replace('"', '') if dpid_r.returncode == 0 else ""
-                sw_id = f"switch-{idx + 1:03d}"
-                _add_node(sw_id, "switch", br_name, dpid=dpid)
+                try:
+                    dpid_r = await ovs_exec(f"ovs-vsctl get bridge {br_name} datapath_id")
+                    dpid = dpid_r.stdout.strip().replace('"', '') if dpid_r.returncode == 0 else ""
+                    sw_id = f"switch-{idx + 1:03d}"
+                    _add_node(sw_id, "switch", br_name, dpid=dpid)
 
-                # Check bridge link state
-                link_r = await ssh_exec(f"cat /sys/class/net/{br_name}/operstate 2>/dev/null || echo unknown")
-                br_status = "up" if link_r.stdout.strip() in ("up", "unknown") else "down"
+                    # Check bridge link state
+                    link_r = await ssh_exec(f"cat /sys/class/net/{br_name}/operstate 2>/dev/null || echo unknown")
+                    br_status = "up" if link_r.stdout.strip() in ("up", "unknown") else "down"
 
-                # ---- 3) Ports on this bridge → host / VXLAN nodes ----
-                ports_r = await ovs_exec(f"ovs-vsctl list-ports {br_name}")
-                if ports_r.returncode == 0:
-                    for port_name in ports_r.stdout.splitlines():
-                        port_name = port_name.strip()
-                        if not port_name:
-                            continue
+                    # ---- 3) Ports on this bridge → host / VXLAN nodes ----
+                    ports_r = await ovs_exec(f"ovs-vsctl list-ports {br_name}")
+                    if ports_r.returncode == 0:
+                        for port_name in ports_r.stdout.splitlines():
+                            port_name = port_name.strip()
+                            if not port_name:
+                                continue
 
-                        # Determine port type
-                        ptype_r = await ovs_exec(
-                            f"ovs-vsctl get interface {port_name} type")
-                        ptype = ptype_r.stdout.strip().replace('"', '') if ptype_r.returncode == 0 else ""
+                            # Determine port type
+                            ptype_r = await ovs_exec(
+                                f"ovs-vsctl get interface {port_name} type")
+                            ptype = ptype_r.stdout.strip().replace('"', '') if ptype_r.returncode == 0 else ""
 
-                        # Check link state
-                        pstate_r = await ssh_exec(
-                            f"cat /sys/class/net/{port_name}/operstate 2>/dev/null || echo unknown")
-                        pstatus = "up" if pstate_r.stdout.strip() in ("up", "unknown") else "down"
+                            # Check link state
+                            pstate_r = await ssh_exec(
+                                f"cat /sys/class/net/{port_name}/operstate 2>/dev/null || echo unknown")
+                            pstatus = "up" if pstate_r.stdout.strip() in ("up", "unknown") else "down"
 
-                        if ptype in ("vxlan", "gre", "geneve"):
-                            # Tunnel → create a remote switch placeholder
-                            remote_r = await ovs_exec(
-                                f"ovs-vsctl get interface {port_name} options:remote_ip")
-                            remote_ip = remote_r.stdout.strip().replace('"', '') if remote_r.returncode == 0 else ""
-                            remote_id = f"remote-{remote_ip.replace('.', '-')}" if remote_ip else f"remote-{port_name}"
-                            _add_node(remote_id, "switch",
-                                      f"remote ({remote_ip or port_name})")
-                            _add_link(sw_id, remote_id, port_name, ptype,
-                                      bw=10000, status=pstatus)
-                        elif ptype == "patch":
-                            # Patch port → switch-to-switch link
-                            # Find the peer patch port to determine target bridge
-                            peer_r = await ovs_exec(
-                                f"ovs-vsctl get interface {port_name} options:peer")
-                            peer_name = peer_r.stdout.strip().replace('"', '') if peer_r.returncode == 0 else ""
-                            if peer_name:
-                                # Find which bridge owns the peer port
-                                peer_br_r = await ovs_exec(
-                                    f"ovs-vsctl port-to-br {peer_name}")
-                                peer_br = peer_br_r.stdout.strip() if peer_br_r.returncode == 0 else ""
-                                if peer_br and peer_br != br_name:
-                                    # Find the peer bridge's node ID
-                                    peer_sw_id = ""
-                                    for n in nodes:
-                                        if n["type"] == "switch" and n["name"] == peer_br:
-                                            peer_sw_id = n["id"]
-                                            break
-                                    if peer_sw_id:
-                                        # Avoid duplicate link (only add from lower ID)
-                                        link_key = tuple(sorted([sw_id, peer_sw_id]))
-                                        if link_key not in patch_links_seen:
-                                            patch_links_seen.add(link_key)
-                                            _add_link(sw_id, peer_sw_id,
-                                                      port_name, peer_name,
-                                                      bw=10000, status=pstatus)
-                        else:
-                            # Check if this is a VRouter port (e.g. router1-veth0)
-                            vr_match = re.match(r'^(.+)-veth(\d+)$', port_name)
-                            if vr_match and vr_match.group(1) in vrouter_names:
-                                rname = vr_match.group(1)
-                                vrouter_id = f"vrouter-{rname}"
-                                if vrouter_id not in node_ids:
-                                    _add_node(vrouter_id, "router", rname)
-                                    # Get all IPs in the namespace
-                                    ip_r = await ssh_exec(
-                                        f"ip netns exec {rname} ip -4 addr show 2>/dev/null"
-                                        " | grep inet | grep -v 127.0.0.1 | awk '{print $2}'")
-                                    ips = [x.strip() for x in ip_r.stdout.strip().splitlines()
-                                           ] if ip_r.returncode == 0 and ip_r.stdout.strip() else []
-                                    for n in nodes:
-                                        if n["id"] == vrouter_id:
-                                            n["metadata"]["ip_forward"] = True
-                                            if ips:
-                                                n["metadata"]["ip"] = ", ".join(ips)
-                                            break
-                                _add_link(sw_id, vrouter_id, port_name, port_name,
-                                          bw=1000, status=pstatus)
-                            else:
-                                # Regular port → host node
-                                host_id = f"host-{port_name}"
-                                _add_node(host_id, "host", port_name)
-                                _add_link(sw_id, host_id, port_name, port_name,
-                                          bw=1000, status=pstatus)
-
-                                # If it's a veth host (e.g. pc1-veth), fetch IP & gateway from netns
-                                if port_name.endswith("-veth"):
-                                    ns_name = port_name[:-5]  # strip "-veth"
-                                    ip_r = await ssh_exec(
-                                        f"ip netns exec {ns_name} ip -4 addr show dev {ns_name}-eth0 2>/dev/null"
-                                        " | grep inet | awk '{print $2}'")
-                                    host_ip = ip_r.stdout.strip() if ip_r.returncode == 0 else ""
-                                    gw_r = await ssh_exec(
-                                        f"ip netns exec {ns_name} ip route show default 2>/dev/null"
-                                        " | awk '/default via/ {print $3}'")
-                                    host_gw = gw_r.stdout.strip() if gw_r.returncode == 0 else ""
-                                    if host_ip or host_gw:
-                                        hmeta: dict[str, Any] = {}
-                                        if host_ip:
-                                            hmeta["ip"] = host_ip
-                                        if host_gw:
-                                            hmeta["gateway"] = host_gw
+                            if ptype in ("vxlan", "gre", "geneve"):
+                                # Tunnel → create a remote switch placeholder
+                                remote_r = await ovs_exec(
+                                    f"ovs-vsctl get interface {port_name} options:remote_ip")
+                                remote_ip = remote_r.stdout.strip().replace('"', '') if remote_r.returncode == 0 else ""
+                                remote_id = f"remote-{remote_ip.replace('.', '-')}" if remote_ip else f"remote-{port_name}"
+                                _add_node(remote_id, "switch",
+                                          f"remote ({remote_ip or port_name})")
+                                _add_link(sw_id, remote_id, port_name, ptype,
+                                          bw=10000, status=pstatus)
+                            elif ptype == "patch":
+                                # Patch port → switch-to-switch link
+                                # Find the peer patch port to determine target bridge
+                                peer_r = await ovs_exec(
+                                    f"ovs-vsctl get interface {port_name} options:peer")
+                                peer_name = peer_r.stdout.strip().replace('"', '') if peer_r.returncode == 0 else ""
+                                if peer_name:
+                                    # Find which bridge owns the peer port
+                                    peer_br_r = await ovs_exec(
+                                        f"ovs-vsctl port-to-br {peer_name}")
+                                    peer_br = peer_br_r.stdout.strip() if peer_br_r.returncode == 0 else ""
+                                    if peer_br and peer_br != br_name:
+                                        # Find the peer bridge's node ID
+                                        peer_sw_id = ""
                                         for n in nodes:
-                                            if n["id"] == host_id:
-                                                n["metadata"].update(hmeta)
+                                            if n["type"] == "switch" and n["name"] == peer_br:
+                                                peer_sw_id = n["id"]
                                                 break
+                                        if peer_sw_id:
+                                            # Avoid duplicate link (only add from lower ID)
+                                            link_key = tuple(sorted([sw_id, peer_sw_id]))
+                                            if link_key not in patch_links_seen:
+                                                patch_links_seen.add(link_key)
+                                                _add_link(sw_id, peer_sw_id,
+                                                          port_name, peer_name,
+                                                          bw=10000, status=pstatus)
+                            else:
+                                # Check if this is a VRouter port (e.g. router1-veth0)
+                                vr_match = re.match(r'^(.+)-veth(\d+)$', port_name)
+                                if vr_match and vr_match.group(1) in vrouter_names:
+                                    rname = vr_match.group(1)
+                                    vrouter_id = f"vrouter-{rname}"
+                                    if vrouter_id not in node_ids:
+                                        _add_node(vrouter_id, "router", rname)
+                                        # Get all IPs in the namespace
+                                        ip_r = await ssh_exec(
+                                            f"ip netns exec {rname} ip -4 addr show 2>/dev/null"
+                                            " | grep inet | grep -v 127.0.0.1 | awk '{print $2}'")
+                                        ips = [x.strip() for x in ip_r.stdout.strip().splitlines()
+                                               ] if ip_r.returncode == 0 and ip_r.stdout.strip() else []
+                                        for n in nodes:
+                                            if n["id"] == vrouter_id:
+                                                n["metadata"]["ip_forward"] = True
+                                                if ips:
+                                                    n["metadata"]["ip"] = ", ".join(ips)
+                                                break
+                                    _add_link(sw_id, vrouter_id, port_name, port_name,
+                                              bw=1000, status=pstatus)
+                                else:
+                                    # Regular port → host node
+                                    host_id = f"host-{port_name}"
+                                    _add_node(host_id, "host", port_name)
+                                    _add_link(sw_id, host_id, port_name, port_name,
+                                              bw=1000, status=pstatus)
+
+                                    # If it's a veth host (e.g. pc1-veth), fetch IP & gateway from netns
+                                    if port_name.endswith("-veth"):
+                                        ns_name = port_name[:-5]  # strip "-veth"
+                                        ip_r = await ssh_exec(
+                                            f"ip netns exec {ns_name} ip -4 addr show dev {ns_name}-eth0 2>/dev/null"
+                                            " | grep inet | awk '{{print $2}}'")
+                                        host_ip = ip_r.stdout.strip() if ip_r.returncode == 0 else ""
+                                        gw_r = await ssh_exec(
+                                            f"ip netns exec {ns_name} ip route show default 2>/dev/null"
+                                            " | awk '/default via/ {{print $3}}'")
+                                        host_gw = gw_r.stdout.strip() if gw_r.returncode == 0 else ""
+                                        if host_ip or host_gw:
+                                            hmeta: dict[str, Any] = {}
+                                            if host_ip:
+                                                hmeta["ip"] = host_ip
+                                            if host_gw:
+                                                hmeta["gateway"] = host_gw
+                                            for n in nodes:
+                                                if n["id"] == host_id:
+                                                    n["metadata"].update(hmeta)
+                                                    break
+                except Exception as exc:
+                    logger.warning("Failed to discover bridge %s: %s", br_name, exc)
 
             # ---- 5) Standalone hosts/routers (network namespaces not yet linked) ----
             ns_r = await ssh_exec("ip netns list 2>/dev/null")
