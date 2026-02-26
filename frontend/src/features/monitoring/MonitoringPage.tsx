@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { getMonitoringStats, getEvents } from '../../api/endpoints';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { SkeletonCard as _SkeletonCard, ErrorBanner as _ErrorBanner } from '../../components/Shared';
 import { useAppStore } from '../../stores/appStore';
 import {
@@ -24,36 +24,40 @@ export default function MonitoringPage() {
   const [levelFilter, setLevelFilter] = useState('');
   const wsConnected = useAppStore((s) => s.wsStatus === 'connected');
 
-  // History buffers for charts
-  const cpuHistory = useRef<number[]>([]);
-  const memHistory = useRef<number[]>([]);
-  const labelHistory = useRef<string[]>([]);
-  const [, forceUpdate] = useState(0);
+  // History buffers for charts — proper state instead of useRef + forceUpdate
+  const [cpuHistory, setCpuHistory] = useState<number[]>([]);
+  const [memHistory, setMemHistory] = useState<number[]>([]);
+  const [labelHistory, setLabelHistory] = useState<string[]>([]);
 
   const stats = useQuery({
     queryKey: ['monitoring-stats'],
     queryFn: () => getMonitoringStats().then((r) => r.data),
     refetchInterval: wsConnected ? false : 5_000,
+    staleTime: 5_000,
   });
 
   const events = useQuery({
     queryKey: ['events', levelFilter],
     queryFn: () => getEvents(levelFilter || undefined, 50).then((r) => r.data),
+    staleTime: 10_000,
   });
 
   // Append data to history when stats updates
   useEffect(() => {
     if (!stats.data) return;
     const now = new Date().toLocaleTimeString();
-    cpuHistory.current.push(stats.data.cpu_usage);
-    memHistory.current.push(stats.data.memory_usage);
-    labelHistory.current.push(now);
-    if (cpuHistory.current.length > MAX_POINTS) {
-      cpuHistory.current.shift();
-      memHistory.current.shift();
-      labelHistory.current.shift();
-    }
-    forceUpdate((n) => n + 1);
+    setCpuHistory(prev => {
+      const next = [...prev, stats.data.cpu_usage];
+      return next.length > MAX_POINTS ? next.slice(-MAX_POINTS) : next;
+    });
+    setMemHistory(prev => {
+      const next = [...prev, stats.data.memory_usage];
+      return next.length > MAX_POINTS ? next.slice(-MAX_POINTS) : next;
+    });
+    setLabelHistory(prev => {
+      const next = [...prev, now];
+      return next.length > MAX_POINTS ? next.slice(-MAX_POINTS) : next;
+    });
   }, [stats.data]);
 
   const chartOptions = {
@@ -68,11 +72,11 @@ export default function MonitoringPage() {
   };
 
   const cpuChartData = {
-    labels: labelHistory.current,
+    labels: labelHistory,
     datasets: [
       {
         label: 'CPU %',
-        data: cpuHistory.current,
+        data: cpuHistory,
         borderColor: '#3b82f6',
         backgroundColor: 'rgba(59, 130, 246, .15)',
         fill: true,
@@ -83,11 +87,11 @@ export default function MonitoringPage() {
   };
 
   const memChartData = {
-    labels: labelHistory.current,
+    labels: labelHistory,
     datasets: [
       {
         label: 'Memory %',
-        data: memHistory.current,
+        data: memHistory,
         borderColor: '#a78bfa',
         backgroundColor: 'rgba(167, 139, 250, .15)',
         fill: true,

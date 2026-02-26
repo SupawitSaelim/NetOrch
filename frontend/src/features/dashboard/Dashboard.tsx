@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { getHealth, getMonitoringStats, getEvents, getTopology, getBGPSummary, getRoutes } from '../../api/endpoints';
 import { SkeletonCard, ErrorBanner } from '../../components/Shared';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAppStore } from '../../stores/appStore';
 import logo128 from '../../assets/logo-128.png';
@@ -64,23 +64,21 @@ export default function Dashboard() {
   // When WebSocket is connected, it pushes stats/topology/events in real-time,
   // so disable REST polling for those to avoid redundant backend load.
   // Fallback to polling only when WS is disconnected.
-  const health = useQuery({ queryKey: ['health'], queryFn: () => getHealth().then(r => r.data), refetchInterval: 10_000 });
-  const stats = useQuery({ queryKey: ['stats'], queryFn: () => getMonitoringStats().then(r => r.data), refetchInterval: wsConnected ? false : 5_000 });
-  const events = useQuery({ queryKey: ['events'], queryFn: () => getEvents(undefined, 20).then(r => r.data), refetchInterval: wsConnected ? false : 15_000 });
-  const topo = useQuery({ queryKey: ['topology'], queryFn: () => getTopology().then(r => r.data), refetchInterval: wsConnected ? false : 30_000 });
-  const bgp = useQuery({ queryKey: ['bgp-summary'], queryFn: () => getBGPSummary().then(r => r.data), refetchInterval: 15_000 });
-  const routesQ = useQuery({ queryKey: ['routes'], queryFn: () => getRoutes().then(r => r.data), refetchInterval: 15_000 });
+  const health = useQuery({ queryKey: ['health'], queryFn: () => getHealth().then(r => r.data), refetchInterval: 10_000, staleTime: 10_000 });
+  const stats = useQuery({ queryKey: ['stats'], queryFn: () => getMonitoringStats().then(r => r.data), refetchInterval: wsConnected ? false : 5_000, staleTime: 5_000 });
+  const events = useQuery({ queryKey: ['events'], queryFn: () => getEvents(undefined, 20).then(r => r.data), refetchInterval: wsConnected ? false : 15_000, staleTime: 15_000 });
+  const topo = useQuery({ queryKey: ['topology'], queryFn: () => getTopology().then(r => r.data), refetchInterval: wsConnected ? false : 30_000, staleTime: 30_000 });
+  const bgp = useQuery({ queryKey: ['bgp-summary'], queryFn: () => getBGPSummary().then(r => r.data), refetchInterval: 15_000, staleTime: 30_000 });
+  const routesQ = useQuery({ queryKey: ['routes'], queryFn: () => getRoutes().then(r => r.data), refetchInterval: 15_000, staleTime: 30_000 });
 
-  // Sparkline history
-  const cpuHistory = useRef<number[]>([]);
-  const memHistory = useRef<number[]>([]);
-  const [, forceUpdate] = useState(0);
+  // Sparkline history — use state to avoid forceUpdate anti-pattern
+  const [cpuHistory, setCpuHistory] = useState<number[]>([]);
+  const [memHistory, setMemHistory] = useState<number[]>([]);
 
   useEffect(() => {
     if (!stats.data) return;
-    cpuHistory.current = [...cpuHistory.current.slice(-29), stats.data.cpu_usage];
-    memHistory.current = [...memHistory.current.slice(-29), stats.data.memory_usage];
-    forceUpdate(n => n + 1);
+    setCpuHistory(prev => [...prev.slice(-29), stats.data.cpu_usage]);
+    setMemHistory(prev => [...prev.slice(-29), stats.data.memory_usage]);
   }, [stats.data]);
 
   const isLoading = health.isLoading || stats.isLoading;
@@ -145,7 +143,7 @@ export default function Dashboard() {
               <div style={{ height: 6, borderRadius: 3, background: 'var(--color-border)', overflow: 'hidden' }}>
                 <div style={{ height: '100%', borderRadius: 3, background: (stats.data?.cpu_usage ?? 0) > 80 ? '#ef4444' : '#3b82f6', width: `${stats.data?.cpu_usage ?? 0}%`, transition: 'width 0.5s' }} />
               </div>
-              <div style={{ marginTop: 6 }}><Sparkline data={cpuHistory.current} color="#3b82f6" /></div>
+              <div style={{ marginTop: 6 }}><Sparkline data={cpuHistory} color="#3b82f6" /></div>
             </div>
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
@@ -155,7 +153,7 @@ export default function Dashboard() {
               <div style={{ height: 6, borderRadius: 3, background: 'var(--color-border)', overflow: 'hidden' }}>
                 <div style={{ height: '100%', borderRadius: 3, background: (stats.data?.memory_usage ?? 0) > 80 ? '#ef4444' : '#22c55e', width: `${stats.data?.memory_usage ?? 0}%`, transition: 'width 0.5s' }} />
               </div>
-              <div style={{ marginTop: 6 }}><Sparkline data={memHistory.current} color="#22c55e" /></div>
+              <div style={{ marginTop: 6 }}><Sparkline data={memHistory} color="#22c55e" /></div>
             </div>
             <div style={{ fontSize: 11, color: 'var(--color-text-muted)', borderTop: '1px solid var(--color-border)', paddingTop: 8 }}>
               Uptime: {Math.floor((stats.data?.uptime ?? 0) / 3600)}h {Math.floor(((stats.data?.uptime ?? 0) % 3600) / 60)}m

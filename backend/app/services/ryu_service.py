@@ -10,6 +10,7 @@ Renamed to SDNFlowService to reflect that SSH-based ovs-ofctl is the primary pat
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import re
@@ -349,11 +350,10 @@ class SDNFlowService:
         # SSH fallback (or primary when ryu_enabled=False)
         try:
             bridges = await self._ssh_list_bridges()
-            switches = []
-            for br in bridges:
-                sw = await self._ssh_get_switch(br)
-                switches.append(sw)
-            return switches
+            switches = await asyncio.gather(*[
+                self._ssh_get_switch(br) for br in bridges
+            ])
+            return list(switches)
         except Exception as exc:
             logger.error("get_switches (SSH) failed: %s", exc)
             return []
@@ -395,10 +395,12 @@ class SDNFlowService:
                 return _parse_dump_flows(r.stdout, dpid)
             else:
                 bridges = await self._ssh_list_bridges()
+                flow_results = await asyncio.gather(*[
+                    self._ofctl("dump-flows", br) for br in bridges
+                ], return_exceptions=True)
                 all_flows_ssh: list[dict] = []
-                for br in bridges:
-                    r = await self._ofctl("dump-flows", br)
-                    if r.returncode == 0:
+                for br, r in zip(bridges, flow_results):
+                    if not isinstance(r, Exception) and r.returncode == 0:
                         all_flows_ssh.extend(_parse_dump_flows(r.stdout, br))
                 return all_flows_ssh
         except Exception as exc:

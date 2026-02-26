@@ -10,6 +10,7 @@ import asyncio
 import logging
 import os
 import tempfile
+import time
 from typing import NamedTuple
 
 from app.core.config import settings
@@ -24,6 +25,8 @@ _CONTROL_PATH = os.path.join(_CONTROL_DIR, "ctrl-%C")
 # Lock to prevent concurrent ControlMaster establishment races
 _master_lock = asyncio.Lock()
 _master_established = False
+_last_check_time: float = 0.0
+_CHECK_INTERVAL: float = 5.0  # seconds — skip subprocess check within this window
 
 
 class CmdResult(NamedTuple):
@@ -33,11 +36,17 @@ class CmdResult(NamedTuple):
 
 
 async def _ensure_control_master() -> None:
-    """Establish a persistent SSH ControlMaster connection if not already active."""
-    global _master_established
+    """Establish a persistent SSH ControlMaster connection if not already active.
+
+    Caches the alive-check for _CHECK_INTERVAL seconds to avoid spawning
+    a subprocess on every single ssh_exec() call.
+    """
+    global _master_established, _last_check_time
+    now = time.monotonic()
+    if _master_established and (now - _last_check_time) < _CHECK_INTERVAL:
+        return  # Recently verified — skip subprocess check
     if _master_established:
         # Quick check if master socket is still alive
-        ssh_key = os.path.expanduser(settings.vm_ssh_key)
         check = await asyncio.create_subprocess_exec(
             "ssh",
             "-o", "StrictHostKeyChecking=no",
@@ -49,6 +58,7 @@ async def _ensure_control_master() -> None:
         )
         await check.communicate()
         if check.returncode == 0:
+            _last_check_time = now
             return
         logger.info("SSH ControlMaster socket stale, re-establishing...")
         _master_established = False
@@ -77,6 +87,7 @@ async def _ensure_control_master() -> None:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=15)
         if proc.returncode == 0:
             _master_established = True
+            _last_check_time = time.monotonic()
             logger.info("SSH ControlMaster established successfully")
         else:
             logger.warning(

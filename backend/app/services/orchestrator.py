@@ -124,8 +124,10 @@ class Orchestrator:
 
     async def _fetch_monitoring_stats(self) -> dict:
         """Fetch stats from all services using asyncio.gather for parallelism."""
-        # Run all 6 independent calls in parallel instead of sequentially
-        routes, bgp_neighbors, ospf_neighbors, flows, switches, bridges = (
+        from app.services.ssh_utils import ssh_exec
+
+        # Run all 8 independent calls in parallel (including CPU/mem)
+        routes, bgp_neighbors, ospf_neighbors, flows, switches, bridges, cpu_r, mem_r = (
             await asyncio.gather(
                 self.frr.get_routing_table(),
                 self.frr.get_bgp_neighbors(),
@@ -133,22 +135,35 @@ class Orchestrator:
                 self.ryu.get_flows(),
                 self.ryu.get_switches(),
                 self.ovs.list_bridges(),
+                ssh_exec("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'"),
+                ssh_exec("free | awk '/Mem:/{printf \"%.1f\", $3/$2*100}'"),
+                return_exceptions=True,
             )
         )
 
-        # Try to get real CPU/memory from VM
+        # Parse CPU/memory results (fall back to defaults on error)
         cpu_usage = 12.5
         memory_usage = 35.0
         try:
-            from app.services.ssh_utils import ssh_exec
-            cpu_r = await ssh_exec("top -bn1 | grep 'Cpu(s)' | awk '{print $2}'")
-            if cpu_r.returncode == 0 and cpu_r.stdout.strip():
+            if not isinstance(cpu_r, Exception) and cpu_r.returncode == 0 and cpu_r.stdout.strip():
                 cpu_usage = float(cpu_r.stdout.strip())
-            mem_r = await ssh_exec("free | awk '/Mem:/{printf \"%.1f\", $3/$2*100}'")
-            if mem_r.returncode == 0 and mem_r.stdout.strip():
+            if not isinstance(mem_r, Exception) and mem_r.returncode == 0 and mem_r.stdout.strip():
                 memory_usage = float(mem_r.stdout.strip())
-        except Exception:
+        except (ValueError, AttributeError):
             pass
+        # Ensure service results have defaults on exception
+        if isinstance(routes, Exception):
+            routes = []
+        if isinstance(bgp_neighbors, Exception):
+            bgp_neighbors = []
+        if isinstance(ospf_neighbors, Exception):
+            ospf_neighbors = []
+        if isinstance(flows, Exception):
+            flows = []
+        if isinstance(switches, Exception):
+            switches = []
+        if isinstance(bridges, Exception):
+            bridges = []
 
         return {
             "cpu_usage": cpu_usage,
