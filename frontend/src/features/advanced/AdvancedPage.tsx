@@ -14,7 +14,7 @@ import {
   getMetricsPrometheus,
 } from '../../api/endpoints';
 import { ErrorBanner, EmptyState } from '../../components/Shared';
-import type { SimulatedFailure, TrafficPolicy, MetricsExport } from '../../types';
+import type { SimulatedFailure, TrafficPolicy } from '../../types';
 
 /* ───────── Tab types ───────── */
 type Tab = 'failures' | 'traffic' | 'metrics';
@@ -199,7 +199,7 @@ function FailureSimulationPanel() {
                   </td>
                   <td style={{ ...tdStyle, fontFamily: 'monospace', fontWeight: 600 }}>{f.target_id}</td>
                   <td style={{ ...tdStyle, fontSize: 12, color: 'var(--color-text-muted)' }}>
-                    {f.details.action ?? ''} {f.details.type ? `(${f.details.type})` : ''}
+                    {String(f.details.action ?? '')} {f.details.type ? `(${String(f.details.type)})` : ''}
                   </td>
                   <td style={{ ...tdStyle, fontSize: 12 }}>{new Date(f.timestamp).toLocaleTimeString()}</td>
                   <td style={tdStyle}>

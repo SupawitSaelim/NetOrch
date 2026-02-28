@@ -16,7 +16,7 @@ Object.defineProperty(window, 'matchMedia', {
 });
 
 // Mock ResizeObserver (used by xterm, chart.js, etc.)
-global.ResizeObserver = class {
+(globalThis as Record<string, unknown>).ResizeObserver = class {
   observe() {}
   unobserve() {}
   disconnect() {}
