@@ -153,3 +153,48 @@ export interface VRFListResponse {
   vrfs: VRFInfo[];
   total: number;
 }
+
+// --- Advanced (Phase 3) ---
+export interface SimulatedFailure {
+  target_type: 'link' | 'node';
+  target_id: string;
+  details: Record<string, unknown>;
+  timestamp: string;
+}
+
+export interface TrafficPolicy {
+  id: string;
+  name: string;
+  description: string;
+  match: Record<string, unknown>;
+  action: Record<string, unknown>;
+  priority: number;
+  enabled: boolean;
+  hit_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MetricsExport {
+  format: string;
+  timestamp: string;
+  system: {
+    version: string;
+    mode: string;
+    hostname: string;
+    uptime_seconds: number;
+  };
+  health: Record<string, string>;
+  resources: {
+    cpu_usage_percent: number;
+    memory_usage_percent: number;
+  };
+  networking: {
+    frr: Record<string, number>;
+    ovs: Record<string, number>;
+    ryu: Record<string, number>;
+  };
+  api: {
+    requests_total: number;
+  };
+}

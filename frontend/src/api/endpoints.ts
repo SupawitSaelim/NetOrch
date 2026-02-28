@@ -4,12 +4,15 @@ import type {
   Event,
   FlowRule,
   HealthResponse,
+  MetricsExport,
   MonitoringStats,
   Route,
+  SimulatedFailure,
   Switch,
   SystemInfo,
   TokenResponse,
   Topology,
+  TrafficPolicy,
   VRFListResponse,
 } from '../types';
 
@@ -268,3 +271,51 @@ export const getAuditLogs = (params?: { limit?: number; offset?: number; user?: 
 
 export const clearAuditLogs = () =>
   client.delete<{ success: boolean; cleared: number }>('/audit/logs');
+
+// --- Advanced: Failure Simulation ---
+export const getActiveFailures = () =>
+  client.get<{ failures: SimulatedFailure[]; total: number }>('/simulate/failures');
+
+export const simulateLinkDown = (link_id: string) =>
+  client.post<{ success: boolean; message?: string; error?: string; failure?: SimulatedFailure; active_failures: SimulatedFailure[] }>(
+    '/simulate/link-down', { link_id },
+  );
+
+export const simulateNodeFailure = (node_id: string) =>
+  client.post<{ success: boolean; message?: string; error?: string; failure?: SimulatedFailure; active_failures: SimulatedFailure[] }>(
+    '/simulate/node-failure', { node_id },
+  );
+
+export const restoreAllFailures = () =>
+  client.post<{ success: boolean; message: string; restored: number; errors: string[] }>(
+    '/simulate/restore',
+  );
+
+export const restoreOneFailure = (target_id: string) =>
+  client.post<{ success: boolean; message?: string; error?: string }>(`/simulate/restore/${target_id}`);
+
+// --- Advanced: Traffic Engineering ---
+export const getTrafficPolicies = () =>
+  client.get<{ policies: TrafficPolicy[]; total: number }>('/traffic/policies');
+
+export const createTrafficPolicy = (data: {
+  name: string; description?: string;
+  match?: Record<string, unknown>; action?: Record<string, unknown>;
+  priority?: number;
+}) => client.post<{ success: boolean; message: string; policy: TrafficPolicy }>('/traffic/policies', data);
+
+export const updateTrafficPolicy = (id: string, data: Record<string, unknown>) =>
+  client.put<{ success: boolean; message: string; policy: TrafficPolicy }>(`/traffic/policies/${id}`, data);
+
+export const deleteTrafficPolicy = (id: string) =>
+  client.delete<{ success: boolean; message: string }>(`/traffic/policies/${id}`);
+
+export const toggleTrafficPolicy = (id: string) =>
+  client.post<{ success: boolean; message: string; policy: TrafficPolicy }>(`/traffic/policies/${id}/toggle`);
+
+// --- Advanced: Metrics Export ---
+export const getMetricsJson = () =>
+  client.get<MetricsExport>('/metrics/export');
+
+export const getMetricsPrometheus = () =>
+  client.get<string>('/metrics/prometheus', { responseType: 'text' as any });
