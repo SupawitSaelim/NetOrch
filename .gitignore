@@ -47,3 +47,4 @@ htmlcov/
 
 # State
 state.json
+tsconfig.tsbuildinfo
