@@ -198,3 +198,50 @@ export interface MetricsExport {
     requests_total: number;
   };
 }
+
+// --- Connection Settings ---
+export interface ConnectionSettings {
+  vm_host: string;
+  vm_user: string;
+  vm_ssh_key: string;
+  ryu_url: string;
+  frr_enabled: boolean;
+  ryu_enabled: boolean;
+  ovs_enabled: boolean;
+}
+
+export interface ConnectionTestResult {
+  ssh: { status: string; message: string; host?: string };
+  ryu: { status: string; message: string; url?: string };
+  frr: { status: string; message: string };
+  ovs: { status: string; message: string };
+}
+
+export interface DetectResult {
+  detected_ip: string | null;
+  method: string | null;
+  candidates: { ip: string; status: string; method: string; ssh_status?: string }[];
+}
+
+export interface ServiceStatus {
+  service: string;
+  status: 'running' | 'stopped' | 'error' | 'not-installed';
+  message: string;
+  unit: string | null;
+}
+
+export interface ServiceActionResult {
+  success: boolean;
+  service: string;
+  action: string;
+  status: string;
+  message: string;
+}
+
+export interface AllServicesStatus {
+  services: {
+    frr: ServiceStatus;
+    ryu: ServiceStatus;
+    ovs: ServiceStatus;
+  };
+}

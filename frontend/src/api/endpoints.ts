@@ -1,12 +1,17 @@
 import client from './client';
 import type {
+  AllServicesStatus,
   BGPSummary,
+  ConnectionSettings,
+  ConnectionTestResult,
+  DetectResult,
   Event,
   FlowRule,
   HealthResponse,
   MetricsExport,
   MonitoringStats,
   Route,
+  ServiceActionResult,
   SimulatedFailure,
   Switch,
   SystemInfo,
@@ -319,3 +324,26 @@ export const getMetricsJson = () =>
 
 export const getMetricsPrometheus = () =>
   client.get<string>('/metrics/prometheus', { responseType: 'text' as any });
+
+// --- Connection Settings ---
+export const getConnectionSettings = () =>
+  client.get<ConnectionSettings>('/connection');
+
+export const updateConnectionSettings = (data: Partial<ConnectionSettings>) =>
+  client.put<{ success: boolean; message: string; changes: Record<string, string> }>('/connection', data);
+
+export const testConnection = () =>
+  client.post<ConnectionTestResult>('/connection/test');
+
+export const testCustomConnection = (data: Partial<ConnectionSettings>) =>
+  client.post<ConnectionTestResult>('/connection/test/custom', data);
+
+export const detectVmIp = () =>
+  client.post<DetectResult>('/connection/detect');
+
+// --- Service Management ---
+export const getServicesStatus = () =>
+  client.get<AllServicesStatus>('/connection/services/status');
+
+export const serviceAction = (service: string, action: string) =>
+  client.post<ServiceActionResult>('/connection/services/action', { service, action });

@@ -18,9 +18,12 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 # ── SSH ControlMaster socket path ──
-_CONTROL_DIR = os.path.join(tempfile.gettempdir(), "netorch-ssh")
+# Use /tmp directly (not tempfile.gettempdir()) to keep the path short.
+# macOS limits Unix socket paths to 104 bytes; the default $TMPDIR
+# (/var/folders/…) is too long when combined with %C hash expansion.
+_CONTROL_DIR = "/tmp/netorch-ssh"
 os.makedirs(_CONTROL_DIR, mode=0o700, exist_ok=True)
-_CONTROL_PATH = os.path.join(_CONTROL_DIR, "ctrl-%C")
+_CONTROL_PATH = os.path.join(_CONTROL_DIR, "ctl-%r@%h:%p")
 
 # Lock to prevent concurrent ControlMaster establishment races
 _master_lock = asyncio.Lock()

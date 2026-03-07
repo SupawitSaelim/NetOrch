@@ -30,6 +30,7 @@ const navItems: NavItem[] = [
   { path: '/labs', label: 'Labs', icon: '🧪' },
   { path: '/learn', label: 'Learn', icon: '📚' },
   { path: '/advanced', label: 'Advanced', icon: '⚡' },
+  { path: '/settings', label: 'Connection', icon: '⚙️' },
   { path: '/admin', label: 'Admin', icon: '🔒' },
 ];
 
