@@ -76,7 +76,8 @@ export default function RouterTerminalPage() {
 
     // Open WebSocket — use relative path so Vite proxy handles upgrade
     const wsProtocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    const url = `${wsProtocol}://${window.location.host}/api/v1/ws/terminal?shell=vtysh&netns=${routerName}`;
+    const token = localStorage.getItem('token');
+    const url = `${wsProtocol}://${window.location.host}/api/v1/ws/terminal?shell=vtysh&netns=${routerName}&token=${token}`;
 
     const ws = new WebSocket(url);
     ws.binaryType = 'arraybuffer';

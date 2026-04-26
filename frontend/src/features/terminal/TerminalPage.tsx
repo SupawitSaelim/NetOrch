@@ -58,7 +58,8 @@ export default function TerminalPage() {
     const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
     const host = window.location.hostname;
     const port = window.location.port;
-    const url = `${protocol}://${host}:${port}/api/v1/ws/terminal?shell=${selectedShell}`;
+    const token = localStorage.getItem('token');
+    const url = `${protocol}://${host}:${port}/api/v1/ws/terminal?shell=${selectedShell}&token=${token}`;
 
     const ws = new WebSocket(url);
     ws.binaryType = 'arraybuffer';

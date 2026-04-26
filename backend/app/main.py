@@ -36,6 +36,15 @@ async def lifespan(app: FastAPI):
         logger.warning(
             "⚠️  Default admin password in use — set ADMIN_PASSWORD env var!"
         )
+
+    # Warm up SSH ControlMaster connection to avoid first-request timeout
+    from app.services.ssh_utils import _ensure_control_master
+    try:
+        await _ensure_control_master()
+        logger.info("✓ SSH ControlMaster warmed up")
+    except Exception as e:
+        logger.warning(f"SSH warmup failed (VM may be offline): {e}")
+
     start_broadcast_loop()
     ws_manager.push_event("info", "system", "Platform started — WebSocket broadcasting enabled")
     yield
